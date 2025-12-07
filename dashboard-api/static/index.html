@@ -1,0 +1,205 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Autonomous AI Firewall — Send Alert</title>
+  <style>
+    :root{
+      --bg:#0f1724; --panel:#0b1220; --muted:#94a3b8; --accent:#06b6d4; --accent-2:#7c3aed; --card:#0b1220; --glass: rgba(255,255,255,0.03);
+    }
+    html,body{height:100%;margin:0;font-family:Inter,Segoe UI,Arial;background:linear-gradient(180deg,var(--bg) 0%, #071028 100%);color:#e6eef6}
+    .wrap{max-width:1100px;margin:28px auto;padding:20px;display:grid;grid-template-columns:1fr 380px;gap:20px}
+    .card{background:linear-gradient(180deg,var(--card), rgba(255,255,255,0.02));border-radius:12px;padding:16px;box-shadow:0 6px 24px rgba(2,6,23,0.6);}
+    h1,h2{margin:0 0 8px 0}
+    label{display:block;margin-top:8px;color:var(--muted);font-size:13px}
+    input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit}
+    button{background:linear-gradient(90deg,var(--accent),var(--accent-2));border:0;color:#032; padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:600}
+    pre{background:rgba(0,0,0,0.12);padding:12px;border-radius:8px;overflow:auto;color:#cde}
+    .left{display:flex;flex-direction:column;gap:12px}
+    .right{display:flex;flex-direction:column;gap:12px}
+    .small{font-size:13px;color:var(--muted)}
+    .row{display:flex;gap:8px}
+    #actions, #logs{height:220px}
+    @media(max-width:900px){.wrap{grid-template-columns:1fr; padding:12px}.right{order:2}}
+  </style>
+</head>
+<body>
+  <!doctype html>
+  <html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CYBERNETICS — Autonomous AI Firewall</title>
+    <style>
+      /* Hacker terminal theme */
+      :root{--bg:#020600;--panel:#05120a;--neon:#00ff66;--neon-dim:#66ff9a;--muted:#2b6b39}
+      html,body{height:100%;margin:0;font-family:Consolas,monospace,monospace;background:radial-gradient(ellipse at top left,#00110a 0%,#000404 60%);color:var(--neon);}
+      .container{max-width:1200px;margin:18px auto;padding:14px;display:grid;grid-template-columns:1fr 420px;gap:16px}
+      header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+      header h1{margin:0;color:var(--neon);font-size:18px;letter-spacing:1px}
+      header .subtitle{color:var(--neon-dim);font-size:12px}
+      .panel{background:linear-gradient(180deg,rgba(0,0,0,0.25),rgba(0,0,0,0.12));border:2px solid rgba(0,255,102,0.12);padding:12px;border-radius:4px;box-shadow:0 6px 0 rgba(0,0,0,0.6)}
+      .panel-title{color:var(--neon);font-weight:700;font-size:13px;margin-bottom:6px;border-bottom:1px dashed rgba(0,255,102,0.06);padding-bottom:6px}
+      .muted{color:var(--neon-dim);font-size:12px}
+      label{display:block;margin:6px 0;color:var(--neon-dim);font-size:12px}
+      input,select,textarea{width:100%;padding:8px;background:transparent;border:1px solid rgba(0,255,102,0.08);color:var(--neon);border-radius:3px}
+      button{background:transparent;color:#001; padding:8px 12px;border-radius:3px;border:2px solid var(--neon);font-weight:bold;cursor:pointer}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      pre{background:transparent;border-left:3px solid rgba(0,255,102,0.08);padding:8px;color:var(--neon-dim);margin:6px 0;max-height:240px;overflow:auto}
+      .actions-list, .log-pane{height:260px;overflow:auto;padding:6px;border:1px dashed rgba(0,255,102,0.06)}
+      .right-col{display:flex;flex-direction:column;gap:10px}
+      .section-small{font-size:12px;color:var(--neon-dim)}
+      .btn-ghost{background:transparent;border:1px solid rgba(0,255,102,0.12);color:var(--neon);padding:6px 8px;border-radius:3px}
+      footer{margin-top:12px;color:var(--neon-dim);font-size:12px}
+      @media(max-width:980px){.container{grid-template-columns:1fr;padding:8px}.right-col{order:2}}
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div>
+      <div style="position:fixed;left:8px;bottom:8px;color:var(--neon-dim);font-size:12px">Theme: Hacker Terminal • Green-on-Black</div>
+      <script>
+        const ML_BASE = window.ML_BASE || '/';
+        async function checkStatus(){
+          try{
+            const res = await fetch('/ml/status');
+            const json = await res.json();
+            document.getElementById('mlStatus').innerText = json.active || 'unknown';
+          }catch(e){document.getElementById('mlStatus').innerText = 'offline'}
+        }
+        async function sendAlert(){
+          const body = {type:document.getElementById('type').value, ip:document.getElementById('ip').value, packet_rate:parseFloat(document.getElementById('packet_rate').value)||0, syn_count:parseInt(document.getElementById('syn_count').value)||0, cpu_load:parseFloat(document.getElementById('cpu').value)||0}
+          const res = await fetch('/alerts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+          const json = await res.json();
+          document.getElementById('result').innerText = JSON.stringify(json, null, 2);
+          refreshActions();
+        }
+        async function runTest(){
+          document.getElementById('testResult').innerText = 'running...';
+          const res = await fetch('/run/test',{method:'POST'});
+          const job = await res.json();
+          // poll
+          let status='pending';
+          const id = job.job_id;
+          while(status!=='completed' && status!=='failed'){
+            await new Promise(r=>setTimeout(r,800));
+            const r2 = await fetch('/run/test/'+id);
+            const j = await r2.json();
+            status = j.status; document.getElementById('testResult').innerText = JSON.stringify(j, null, 2);
+          }
+          refreshActions();
+        }
+        async function refreshActions(){
+          const res = await fetch('/actions');
+          const j = await res.json();
+          const last = j[j.length-1];
+          document.getElementById('actions').innerText = j.map(x=>`${x.time} ${x.ip} -> action:${x.action}`).join('\n');
+          document.getElementById('lastAction').innerText = last? JSON.stringify(last):'(no actions yet)';
+        }
+        async function refreshLogs(){
+          const file = document.getElementById('logFile').value;
+          const res = await fetch('/logs?file='+encodeURIComponent(file));
+          if(res.status===200){
+            const text = await res.text(); document.getElementById('logs').innerText = text;
+          } else { document.getElementById('logs').innerText = '(no logs)'; }
+        }
+        document.getElementById('sendBtn').addEventListener('click',sendAlert);
+        document.getElementById('runTest').addEventListener('click',runTest);
+        document.getElementById('refreshActions').addEventListener('click',refreshActions);
+        document.getElementById('refreshLogs').addEventListener('click',refreshLogs);
+        checkStatus(); refreshActions();
+      </script>
+        <header>
+          <h1>CYBERNETICS — Autonomous AI Firewall</h1>
+          <div class="subtitle">OPERATOR CONSOLE &nbsp;|&nbsp; STATUS: <span id="mlStatus">checking...</span></div>
+        </header>
+
+        <div class="panel">
+          <div class="panel-title">Send Alert</div>
+          <div class="grid">
+            <div>
+              <label>Type</label>
+              <select id="type"><option value="syn_flood">syn_flood</option><option value="normal">normal</option></select>
+              <label>IP</label>
+              <input id="ip" value="10.0.0.11" />
+            </div>
+            <div>
+              <label>Packet rate</label>
+              <input id="packet_rate" value="5000" type="number" />
+              <label>Syn count</label>
+              <input id="syn_count" value="400" type="number" />
+            </div>
+          </div>
+          <label>CPU load</label>
+          <input id="cpu" value="0.9" type="number" step="0.1" min="0" max="1" />
+          <div style="margin-top:8px"><button id="sendBtn">EMIT ALERT</button></div>
+          <div style="margin-top:10px"><div class="panel-title">Response</div><pre id="result">(no response)</pre></div>
+        </div>
+
+        <div class="panel" style="margin-top:10px">
+          <div class="panel-title">Automated Tester</div>
+          <div class="section-small">Run an automated scenario to exercise ML endpoints and collect results.</div>
+          <div style="margin-top:8px" class="grid"><button id="runTest" class="btn-ghost">RUN TEST</button><button id="refreshActions" class="btn-ghost">REFRESH ACTIONS</button></div>
+          <div style="margin-top:8px"><pre id="testResult">(no test yet)</pre></div>
+        </div>
+      </div>
+
+      <div class="right-col">
+        <div class="panel">
+          <div class="panel-title">Live Action</div>
+          <div class="muted">Last action from agent / ML</div>
+          <pre id="lastAction">(no actions yet)</pre>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Activity Log</div>
+          <div class="actions-list" id="actions">(no actions)</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Logs</div>
+          <label>File</label>
+          <select id="logFile"><option>dashboard.log</option><option>ml-engine.log</option></select>
+          <div style="margin-top:8px"><button id="refreshLogs" class="btn-ghost">REFRESH LOGS</button></div>
+          <div class="log-pane" id="logs">(no logs)</div>
+        </div>
+
+      </div>
+    </div>
+      try{
+        const r = await fetch('/actions');
+        const j = await r.json();
+        document.getElementById('actions').textContent = JSON.stringify(j, null, 2);
+      }catch(e){ document.getElementById('actions').textContent = 'err '+e }
+    }
+    document.getElementById('refreshActions').addEventListener('click', refreshActions);
+
+    document.getElementById('refreshLogs').addEventListener('click', async ()=>{
+      const file = document.getElementById('logFile').value;
+      try{
+        const r = await fetch('/logs?filename='+encodeURIComponent(file)+'&lines=200');
+        const j = await r.json();
+        document.getElementById('logs').textContent = j.lines;
+      }catch(e){ document.getElementById('logs').textContent = 'err '+e }
+    });
+
+    document.getElementById('runTest').addEventListener('click', async ()=>{
+      document.getElementById('testResult').textContent = 'starting...';
+      try{
+        const r = await fetch('/run/test', {method:'POST'});
+        const jid = (await r.json()).job_id;
+        // poll for completion
+        let done=false;
+        while(!done){
+          await new Promise(res=>setTimeout(res,1000));
+          const s = await fetch('/run/test/'+jid);
+          const j = await s.json();
+          document.getElementById('testResult').textContent = JSON.stringify(j, null, 2);
+          if (j.status && (j.status==='completed' || j.status==='failed')) done=true;
+        }
+      }catch(e){ document.getElementById('testResult').textContent = 'err '+e }
+    });
+
+  </script>
+</body>
+</html>
