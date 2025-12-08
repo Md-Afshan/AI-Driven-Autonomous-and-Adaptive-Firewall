@@ -21,6 +21,9 @@ import tensorflow as tf
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from scapy.all import IP, TCP, UDP, Raw, sniff
 from netfilterqueue import NetfilterQueue
+import threading
+import queue
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -32,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'ml-engine', 'models')
 DASHBOARD_API_URL = os.getenv('DASHBOARD_API_URL', 'http://localhost:8000')
+DASHBOARD_API_KEY = os.getenv('DASHBOARD_API_KEY', 'secret-token')
 MAX_SEQ_LENGTH = 200
 DETECTION_THRESHOLD_CNN = 0.7
 DETECTION_THRESHOLD_RF = 0.6
@@ -202,6 +206,12 @@ class PacketAnalyzer:
                     result['confidence'] = waf_confidence
                     result['details']['payload_sample'] = payload[:200]
                     return result
+                else:
+                    # Payload was analyzed but safe - mark as benign
+                    result['attack_type'] = 'Benign'
+                    result['confidence'] = 0.0
+                    result['details']['payload_sample'] = payload[:200]
+                    return result
             
             # Check flow features (NIDS - DDoS detection)
             flow_features = self.extract_flow_features(packet)
@@ -211,6 +221,11 @@ class PacketAnalyzer:
                     result['is_malicious'] = True
                     result['attack_type'] = 'DDoS'
                     result['confidence'] = nids_confidence
+                    return result
+                else:
+                    # Flow was analyzed but safe - mark as benign
+                    result['attack_type'] = 'Benign'
+                    result['confidence'] = 0.0
                     return result
         
         except Exception as e:
@@ -261,9 +276,11 @@ class AlertManager:
                 if now - last_alert_time < ALERT_TIMEOUT:
                     return True  # Skip sending duplicate alert
             
+            headers = {'Content-Type': 'application/json', 'X-API-Key': DASHBOARD_API_KEY}
             response = requests.post(
                 f"{self.dashboard_url}/alerts",
                 json=alert_data,
+                headers=headers,
                 timeout=5
             )
             
@@ -279,19 +296,18 @@ class AlertManager:
             return False
     
     def handle_threat(self, packet, analysis: Dict[str, Any]) -> bool:
-        """Block IP and send alert"""
-        if not analysis['is_malicious']:
-            return False
-        
-        src_ip = analysis['details']['source_ip']
-        dst_ip = analysis['details']['destination_ip']
+        """Handle both threats and benign traffic"""
+        src_ip = analysis['details'].get('source_ip', 'unknown')
+        dst_ip = analysis['details'].get('destination_ip', 'unknown')
         attack_type = analysis['attack_type']
         confidence = analysis['confidence']
         
-        # Block the attacker IP
-        self.block_ip(src_ip)
+        # If malicious, block the attacker IP
+        if analysis['is_malicious']:
+            self.block_ip(src_ip)
+            logger.warning(f"THREAT DETECTED: {attack_type} from {src_ip} to {dst_ip} (confidence: {confidence:.2f})")
         
-        # Send alert to dashboard
+        # Send alert to dashboard for both benign and malicious traffic
         alert_data = {
             'source_ip': src_ip,
             'destination_ip': dst_ip,
@@ -303,9 +319,50 @@ class AlertManager:
         
         self.send_alert(alert_data)
         
-        logger.warning(f"THREAT DETECTED: {attack_type} from {src_ip} to {dst_ip} (confidence: {confidence:.2f})")
-        
-        return True
+        return analysis['is_malicious']
+
+
+class TrafficReporter(threading.Thread):
+    """Background thread to batch and send traffic metadata to dashboard to avoid blocking packet processing."""
+
+    def __init__(self, dashboard_url: str, api_key: str, interval: float = 0.5):
+        super().__init__(daemon=True)
+        self.dashboard_url = dashboard_url.rstrip('/')
+        self.api_key = api_key
+        self.interval = interval
+        self.q = queue.Queue()
+        self.running = True
+
+    def enqueue(self, item: Dict[str, Any]):
+        try:
+            self.q.put_nowait(item)
+        except queue.Full:
+            logger.debug('Traffic queue full, dropping packet metadata')
+
+    def run(self):
+        headers = {'Content-Type': 'application/json', 'X-API-Key': self.api_key}
+        while self.running:
+            batch = []
+            try:
+                # collect up to N items quickly
+                while len(batch) < 50:
+                    item = self.q.get_nowait()
+                    batch.append(item)
+            except queue.Empty:
+                pass
+
+            # send each item but do not block long
+            for item in batch:
+                try:
+                    requests.post(f"{self.dashboard_url}/traffic", json=item, headers=headers, timeout=1)
+                except Exception:
+                    # suppress to avoid spamming logs
+                    pass
+
+            time.sleep(self.interval)
+
+    def stop(self):
+        self.running = False
 
 
 class SaaSEnforcer:
@@ -318,6 +375,12 @@ class SaaSEnforcer:
         self.models = ModelLoader(MODEL_DIR)
         self.analyzer = PacketAnalyzer(self.models)
         self.alerts = AlertManager(DASHBOARD_API_URL)
+        # Start background traffic reporter to avoid blocking packet thread
+        self.traffic_reporter = TrafficReporter(DASHBOARD_API_URL, DASHBOARD_API_KEY)
+        try:
+            self.traffic_reporter.start()
+        except Exception:
+            logger.warning('Failed to start traffic reporter thread')
         self.packet_count = 0
         self.threat_count = 0
     
@@ -365,6 +428,26 @@ class SaaSEnforcer:
             
             # Analyze the packet
             analysis = self.analyzer.analyze_packet(pkt)
+
+            # Prepare and enqueue traffic metadata (non-blocking)
+            try:
+                proto = 'OTHER'
+                if pkt.haslayer(TCP): proto = 'TCP'
+                elif pkt.haslayer(UDP): proto = 'UDP'
+                meta = {
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'source_ip': pkt.src,
+                    'destination_ip': pkt.dst,
+                    'protocol': proto,
+                    'length': len(pkt),
+                    'verdict': 'DROP' if analysis.get('is_malicious') else 'ALLOW'
+                }
+                try:
+                    self.traffic_reporter.enqueue(meta)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             
             # Handle threats
             if self.alerts.handle_threat(pkt, analysis):

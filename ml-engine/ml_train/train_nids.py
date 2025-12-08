@@ -26,13 +26,16 @@ TEST_SIZE = 0.2
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 
-def load_nsl_kdd_dataset():
+def load_nsl_kdd_dataset(sample_size=None):
     """
     Load NSL-KDD dataset (KDDTrain+.csv) if available; otherwise generate synthetic network flow data.
     When loading KDDTrain+.csv we perform simple preprocessing:
       - treat second-last column as label (normal vs attack)
       - drop `service` column to limit dimensionality
       - one-hot encode `protocol_type` and `flag`
+    
+    Args:
+        sample_size: Optional limit on number of samples to load
     """
     logger.info("Loading NSL-KDD dataset...")
     # Try to load original KDD dataset
@@ -58,6 +61,13 @@ def load_nsl_kdd_dataset():
 
             X = pd.concat([numeric_df.reset_index(drop=True), cat_df.reset_index(drop=True)], axis=1).values
             y = labels.values.astype(int)
+            
+            # Apply sample_size if provided
+            if sample_size and sample_size > 0:
+                indices = np.random.choice(X.shape[0], size=min(sample_size, X.shape[0]), replace=False)
+                X = X[indices]
+                y = y[indices]
+                logger.info(f"Sampled down to {X.shape[0]} samples")
 
             logger.info(f"Loaded KDD dataset with {X.shape[0]} samples and {X.shape[1]} features")
             return X, y
@@ -90,8 +100,14 @@ def load_nsl_kdd_dataset():
     shuffle_idx = np.random.permutation(n_samples)
     X = X[shuffle_idx]
     y = y[shuffle_idx]
+    
+    # Apply sample_size if provided
+    if sample_size and sample_size > 0:
+        X = X[:sample_size]
+        y = y[:sample_size]
+        logger.info(f"Sampled down to {len(y)} samples")
 
-    logger.info(f"Using synthetic dataset with {n_samples} samples (Normal: {(y==0).sum()}, DDoS: {(y==1).sum()})")
+    logger.info(f"Using synthetic dataset with {len(y)} samples (Normal: {(y==0).sum()}, DDoS: {(y==1).sum()})")
     return X, y
 
 
@@ -127,12 +143,16 @@ def build_random_forest_model():
     return model
 
 
-def train_nids_model():
-    """Main training function"""
+def train_nids_model(sample_size=None):
+    """Main training function
+
+    Args:
+        sample_size: Optional limit on dataset size for quick testing
+    """
     logger.info("Starting NIDS model training...")
     
     # Load dataset
-    X, y = load_nsl_kdd_dataset()
+    X, y = load_nsl_kdd_dataset(sample_size=sample_size)
     
     # Create scaler
     scaler = create_scaler(X)
@@ -147,8 +167,16 @@ def train_nids_model():
     
     logger.info(f"Train set: {X_train.shape}, Test set: {X_test.shape}")
     
-    # Build and train model
-    model = build_random_forest_model()
+    # Build and train model (use fewer estimators for quick testing)
+    n_estimators = 50 if sample_size and sample_size > 0 and sample_size < 1000 else N_ESTIMATORS
+    logger.info(f"Building Random Forest model with {n_estimators} estimators...")
+    
+    model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        verbose=1
+    )
     
     logger.info("Training Random Forest model...")
     model.fit(X_train, y_train)
@@ -182,6 +210,11 @@ def train_nids_model():
     logger.info(f"Scaler saved to {scaler_path}")
     
     return model, scaler
+
+
+def train_nids_sample(sample_size: int):
+    """Convenience wrapper for sample-size runs from train_manager"""
+    return train_nids_model(sample_size=sample_size)
 
 
 if __name__ == '__main__':

@@ -12,6 +12,8 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
 import logging
 import pandas as pd
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,11 +33,14 @@ VALIDATION_SPLIT = 0.2
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 
-def load_sql_injection_dataset():
+def load_sql_injection_dataset(sample_size=None):
     """
     Load SQL Injection dataset. Returns sample payloads for training.
     Prefer loading the original dataset from `ml-engine/models/dataset/Modified_SQL_Dataset.csv`.
     If the file is not found, fall back to a small synthetic sample set.
+    
+    Args:
+        sample_size: Optional limit on number of samples to load (for quick testing)
     """
     logger.info("Loading SQL Injection dataset...")
     # Try to load original dataset
@@ -45,6 +50,9 @@ def load_sql_injection_dataset():
             df = pd.read_csv(dataset_path, encoding='utf-8', engine='python')
             # Expecting columns: Query, Label
             if 'Query' in df.columns and 'Label' in df.columns:
+                # Apply sample_size if provided
+                if sample_size and sample_size > 0:
+                    df = df.sample(n=min(sample_size, len(df)), random_state=42)
                 payloads = df['Query'].astype(str).tolist()
                 labels = df['Label'].apply(lambda x: 1 if str(x).strip() in ['1', 'attack', 'malicious'] else 0).values
                 logger.info(f"Loaded {len(payloads)} samples from {dataset_path}")
@@ -86,6 +94,14 @@ def load_sql_injection_dataset():
     # Combine and create labels (1 = SQL injection, 0 = safe)
     payloads = sql_payloads + safe_payloads
     labels = np.array([1] * len(sql_payloads) + [0] * len(safe_payloads))
+    
+    # Apply sample_size if provided
+    if sample_size and sample_size > 0:
+        indices = np.random.choice(len(payloads), size=min(sample_size, len(payloads)), replace=False)
+        payloads = [payloads[i] for i in indices]
+        labels = labels[indices]
+        logger.info(f"Sampled down to {len(payloads)} samples")
+    
     logger.info(f"Using synthetic dataset with {len(payloads)} samples")
     return payloads, labels
 
@@ -108,23 +124,39 @@ def preprocess_payloads(payloads, tokenizer):
     return padded_sequences
 
 
-def build_1d_cnn_model(vocab_size):
-    """Build 1D CNN model for sequence classification"""
+def build_1d_cnn_model(vocab_size, reduced=False):
+    """Build 1D CNN model for sequence classification
+    
+    Args:
+        vocab_size: Size of vocabulary
+        reduced: If True, use a smaller model for quick testing
+    """
     logger.info("Building 1D-CNN model...")
     
-    model = Sequential([
-        Embedding(input_dim=vocab_size + 1, output_dim=EMBEDDING_DIM, input_length=MAX_SEQ_LENGTH),
-        Conv1D(filters=64, kernel_size=5, activation='relu'),
-        MaxPooling1D(pool_size=2),
-        Conv1D(filters=128, kernel_size=5, activation='relu'),
-        MaxPooling1D(pool_size=2),
-        Flatten(),
-        Dense(256, activation='relu'),
-        Dropout(0.5),
-        Dense(128, activation='relu'),
-        Dropout(0.3),
-        Dense(1, activation='sigmoid')  # Binary classification
-    ])
+    if reduced:
+        # Smaller model for quick testing
+        model = Sequential([
+            Embedding(input_dim=vocab_size + 1, output_dim=64),
+            Conv1D(32, 5, activation='relu'),
+            MaxPooling1D(5),
+            Flatten(),
+            Dense(32, activation='relu'),
+            Dropout(0.3),
+            Dense(1, activation='sigmoid')
+        ])
+    else:
+        # Full model
+        model = Sequential([
+            Embedding(input_dim=vocab_size + 1, output_dim=EMBEDDING_DIM),
+            Conv1D(128, 5, activation='relu'),
+            MaxPooling1D(5),
+            Conv1D(64, 5, activation='relu'),
+            MaxPooling1D(5),
+            Flatten(),
+            Dense(128, activation='relu'),
+            Dropout(0.5),
+            Dense(1, activation='sigmoid')
+        ])
     
     model.compile(
         optimizer='adam',
@@ -137,12 +169,16 @@ def build_1d_cnn_model(vocab_size):
     return model
 
 
-def train_waf_model():
-    """Main training function"""
+def train_waf_model(sample_size=None):
+    """Main training function
+
+    Args:
+        sample_size: Optional limit on dataset size for quick testing
+    """
     logger.info("Starting WAF model training...")
     
     # Load dataset
-    payloads, labels = load_sql_injection_dataset()
+    payloads, labels = load_sql_injection_dataset(sample_size=sample_size)
     
     # Create tokenizer
     tokenizer = create_tokenizer(payloads)
@@ -159,12 +195,17 @@ def train_waf_model():
     logger.info(f"Train set: {X_train.shape}, Test set: {X_test.shape}")
     
     # Build and train model
-    model = build_1d_cnn_model(len(tokenizer.word_index))
+    reduced = sample_size is not None and sample_size > 0 and sample_size < 1000
+    model = build_1d_cnn_model(len(tokenizer.word_index), reduced=reduced)
+    
+    # Reduce epochs for sample training
+    epochs = 3 if sample_size and sample_size > 0 else EPOCHS
+    logger.info(f"Training for {epochs} epochs...")
     
     history = model.fit(
         X_train, y_train,
         validation_split=VALIDATION_SPLIT,
-        epochs=EPOCHS,
+        epochs=epochs,
         batch_size=BATCH_SIZE,
         verbose=1
     )
@@ -185,6 +226,11 @@ def train_waf_model():
     logger.info(f"Tokenizer saved to {tokenizer_path}")
     
     return model, tokenizer, history
+
+
+def train_waf_sample(sample_size: int):
+    """Convenience wrapper for sample-size runs from train_manager"""
+    return train_waf_model(sample_size=sample_size)
 
 
 if __name__ == '__main__':

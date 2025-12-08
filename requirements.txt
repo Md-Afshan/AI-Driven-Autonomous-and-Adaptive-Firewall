@@ -1,0 +1,13 @@
+numpy
+pandas
+scikit-learn
+tensorflow
+scapy
+NetfilterQueue
+fastapi
+uvicorn[standard]
+requests
+python-multipart
+pydantic
+
+websockets

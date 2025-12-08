@@ -10,8 +10,8 @@ from pathlib import Path
 # Add parent directory to path to import training modules
 sys.path.insert(0, str(Path(__file__).parent))
 
-from train_waf import train_waf_model
-from train_nids import train_nids_model
+from train_waf import train_waf_model, train_waf_sample
+from train_nids import train_nids_model, train_nids_sample
 
 # Configure logging
 logging.basicConfig(
@@ -94,6 +94,13 @@ Examples:
         action='store_true',
         help='Enable verbose logging'
     )
+
+    parser.add_argument(
+        '--sample-size',
+        type=int,
+        default=0,
+        help='Optional: limit training to a smaller sample size for quick tests (0 = full dataset)'
+    )
     
     args = parser.parse_args()
     
@@ -104,11 +111,18 @@ Examples:
     
     # Execute training
     if args.mode == 'waf':
-        success = train_waf()
+        success = train_waf() if args.sample_size == 0 else train_waf_sample(args.sample_size)
     elif args.mode == 'nids':
-        success = train_nids()
+        success = train_nids() if args.sample_size == 0 else train_nids_sample(args.sample_size)
     else:  # all
-        success = train_all()
+        # For combined mode, if sample-size provided, run both trainers with that limit
+        if args.sample_size and args.sample_size > 0:
+            success_waf = train_waf_sample(args.sample_size)
+            logger.info("\n")
+            success_nids = train_nids_sample(args.sample_size)
+            success = success_waf and success_nids
+        else:
+            success = train_all()
     
     # Exit with appropriate code
     sys.exit(0 if success else 1)
