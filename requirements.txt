@@ -1,0 +1,11 @@
+fastapi>=0.95
+uvicorn>=0.22
+requests>=2.31
+websockets>=11.0
+scapy>=2.5
+netfilterqueue
+numpy
+pandas
+scikit-learn
+tensorflow>=2.11
+pytest

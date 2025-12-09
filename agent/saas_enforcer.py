@@ -11,7 +11,13 @@ import pickle
 import logging
 import argparse
 import requests
+import threading
+import queue
+import time
 import subprocess
+import gzip
+import socket
+import random
 from datetime import datetime
 from typing import Optional, Dict, Any
 from collections import defaultdict
@@ -37,6 +43,12 @@ DETECTION_THRESHOLD_CNN = 0.7
 DETECTION_THRESHOLD_RF = 0.6
 ALERT_TIMEOUT = 300  # seconds
 NFQUEUE_NUM = 1
+TRAFFIC_USE_UDP = os.getenv('TRAFFIC_USE_UDP', 'false').lower() in ('1', 'true', 'yes')
+DASHBOARD_UDP_HOST = os.getenv('DASHBOARD_UDP_HOST', '127.0.0.1')
+DASHBOARD_UDP_PORT = int(os.getenv('DASHBOARD_UDP_PORT', '9999'))
+TRAFFIC_BATCH_MAX = int(os.getenv('TRAFFIC_BATCH_MAX', '50'))
+TRAFFIC_FLUSH_INTERVAL = float(os.getenv('TRAFFIC_FLUSH_INTERVAL', '0.5'))
+TRAFFIC_RETRY_MAX = int(os.getenv('TRAFFIC_RETRY_MAX', '5'))
 
 
 class ModelLoader:
@@ -222,10 +234,12 @@ class PacketAnalyzer:
 class AlertManager:
     """Manage alerts and blocking"""
     
-    def __init__(self, dashboard_url: str):
+    def __init__(self, dashboard_url: str, session: Optional[requests.Session] = None):
         self.dashboard_url = dashboard_url
         self.blocked_ips = set()
         self.alert_cache = {}  # Prevent duplicate alerts
+        self.api_headers = {'X-API-Key': os.getenv('API_KEY', 'secret-token')}
+        self.session = session or requests.Session()
     
     def block_ip(self, ip: str) -> bool:
         """Add IP to ipset blacklist"""
@@ -261,9 +275,10 @@ class AlertManager:
                 if now - last_alert_time < ALERT_TIMEOUT:
                     return True  # Skip sending duplicate alert
             
-            response = requests.post(
+            response = self.session.post(
                 f"{self.dashboard_url}/alerts",
                 json=alert_data,
+                headers=self.api_headers,
                 timeout=5
             )
             
@@ -301,7 +316,13 @@ class AlertManager:
             'payload_sample': analysis['details'].get('payload_sample', '')
         }
         
-        self.send_alert(alert_data)
+        # Send alert asynchronously to avoid blocking packet processing
+        try:
+            t = threading.Thread(target=self.send_alert, args=(alert_data,), daemon=True)
+            t.start()
+        except Exception:
+            # fallback to sync send
+            self.send_alert(alert_data)
         
         logger.warning(f"THREAT DETECTED: {attack_type} from {src_ip} to {dst_ip} (confidence: {confidence:.2f})")
         
@@ -309,17 +330,41 @@ class AlertManager:
 
 
 class SaaSEnforcer:
-    """Main SaaS Firewall Enforcer"""
+    """Main SaaS Firewall Enforcer
+    Supports two runtime modes: 'nfqueue' (default) which requires root and binds NetfilterQueue, and
+    'sniff' (dev) which uses scapy.sniff to gather packets and works for quick developer testing. Use
+    the CLI flag --dev to enable sniff mode (non-root friendly though sniff may still require root in some systems).
+    """
     
-    def __init__(self, mode: str, target_ip: Optional[str] = None):
+    def __init__(self, mode: str, target_ip: Optional[str] = None, dev_mode: bool = False, iface: Optional[str] = None, dashboard_url: Optional[str] = None):
         self.mode = mode
         self.target_ip = target_ip
         self.nfqueue = None
         self.models = ModelLoader(MODEL_DIR)
         self.analyzer = PacketAnalyzer(self.models)
-        self.alerts = AlertManager(DASHBOARD_API_URL)
+        # Dashboard URL override (from CLI)
+        self.dashboard_url = dashboard_url or DASHBOARD_API_URL
+        # Persistent requests session (ensure created before passing to AlertManager)
+        self.session = requests.Session()
+        self.alerts = AlertManager(self.dashboard_url, session=self.session)
+        # UDP socket for traffic sink
+        self.udp_sock = None
+        if TRAFFIC_USE_UDP:
+            try:
+                self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            except Exception as e:
+                logger.warning(f'Failed to create UDP socket: {e}')
+        # Traffic reporting queue & worker (non-blocking)
+        self.traffic_queue = queue.Queue(maxsize=10000)
+        self._stop_traffic_worker = threading.Event()
+        self.traffic_worker = threading.Thread(target=self._traffic_worker, daemon=True)
+        self.traffic_worker.start()
         self.packet_count = 0
         self.threat_count = 0
+        # Developer sniff mode
+        self.dev_mode = dev_mode
+        self.sniff_iface = iface or 'any'
+        self._sniff_thread = None
     
     def check_root_privilege(self):
         """Ensure script is running as root"""
@@ -365,6 +410,30 @@ class SaaSEnforcer:
             
             # Analyze the packet
             analysis = self.analyzer.analyze_packet(pkt)
+
+            # Build traffic summary and enqueue for reporting
+            try:
+                proto = 'OTHER'
+                if pkt.haslayer(TCP): proto = 'TCP'
+                elif pkt.haslayer(UDP): proto = 'UDP'
+                traffic = {
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'source_ip': pkt.src,
+                    'destination_ip': pkt.dst,
+                    'protocol': proto,
+                    'length': len(pkt),
+                    'verdict': 'DROP' if analysis['is_malicious'] else 'ALLOW'
+                }
+                # include optional payload snippet if found so dashboard can perform extra analysis (WAF)
+                if analysis.get('details') and analysis['details'].get('payload_sample'):
+                    traffic['payload_sample'] = analysis['details'].get('payload_sample')
+                }
+                try:
+                    self.traffic_queue.put_nowait(traffic)
+                except queue.Full:
+                    logger.debug('Traffic queue full, dropping traffic report')
+            except Exception:
+                pass
             
             # Handle threats
             if self.alerts.handle_threat(pkt, analysis):
@@ -394,6 +463,13 @@ class SaaSEnforcer:
         if self.target_ip:
             logger.info(f"Target IP: {self.target_ip}")
         
+        # If running in dev sniff mode, skip root-check and NFQUEUE config and start scapy sniffing
+        if self.dev_mode:
+            logger.warning('Starting in DEV sniff mode — scapy will capture packets and we will forward to dashboard')
+            # Start sniffing thread and skip NFQUEUE setup
+            self._start_sniffing()
+            return
+
         # Check root privilege
         self.check_root_privilege()
         
@@ -416,6 +492,68 @@ class SaaSEnforcer:
             logger.error(f"Error starting enforcer: {str(e)}")
             self._cleanup()
             sys.exit(1)
+
+    def _start_sniffing(self):
+        """Start a background scapy.sniff thread to capture packets and handle them via analyzer/alerts."""
+        try:
+            def _sniff_loop():
+                # prn handler receives scapy pkt; use store=False to avoid memory buildup
+                sniff(prn=self._handle_sniffed_packet, iface=self.sniff_iface, store=False)
+
+            self._sniff_thread = threading.Thread(target=_sniff_loop, daemon=True)
+            self._sniff_thread.start()
+            logger.info(f"Sniffing on interface {self.sniff_iface} started (DEV mode)")
+            # Keep main thread alive while sniffing
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info('Stopping sniffing...')
+            # There is no direct clean way to stop sniff from another thread using scapy; rely on process SIGINT
+            self._cleanup()
+        except Exception as e:
+            logger.error(f'Error while sniffing: {e}')
+            self._cleanup()
+
+    def _handle_sniffed_packet(self, pkt):
+        """Handle a scapy sniffed packet similarly to the NFQUEUE callback (but we cannot accept/drop)."""
+        try:
+            # Count
+            self.packet_count += 1
+
+            # Analyze packet
+            analysis = self.analyzer.analyze_packet(pkt)
+
+            # Build traffic summary and enqueue for reporting
+            try:
+                proto = 'OTHER'
+                if pkt.haslayer(TCP): proto = 'TCP'
+                elif pkt.haslayer(UDP): proto = 'UDP'
+                traffic = {
+                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                    'source_ip': pkt[IP].src if pkt.haslayer(IP) else '0.0.0.0',
+                    'destination_ip': pkt[IP].dst if pkt.haslayer(IP) else '0.0.0.0',
+                    'protocol': proto,
+                    'length': len(pkt),
+                    'verdict': 'DROP' if analysis['is_malicious'] else 'ALLOW'
+                }
+                try:
+                    self.traffic_queue.put_nowait(traffic)
+                except queue.Full:
+                    logger.debug('Traffic queue full, dropping traffic report')
+            except Exception:
+                pass
+
+            # Handle threats (best-effort — we can't accept/drop packets with scapy sniff)
+            if self.alerts.handle_threat(pkt, analysis):
+                self.threat_count += 1
+                logger.debug(f"Detected malicious packet from {analysis['details'].get('source_ip')}")
+
+            # Log stats periodically
+            if self.packet_count % 100 == 0:
+                logger.info(f"Processed {self.packet_count} packets, Threats detected: {self.threat_count}")
+
+        except Exception as e:
+            logger.error(f"Error processing sniffed packet: {e}")
     
     def _cleanup(self):
         """Clean up resources"""
@@ -440,6 +578,96 @@ class SaaSEnforcer:
         
         logger.info(f"Final stats: {self.packet_count} packets processed, {self.threat_count} threats detected")
         logger.info("Enforcer stopped")
+        # Stop traffic worker
+        try:
+            self._stop_traffic_worker.set()
+        except Exception:
+            pass
+
+    def _traffic_worker(self):
+        """Background worker that batches and sends traffic summaries to the dashboard API"""
+        batch = []
+        max_batch = TRAFFIC_BATCH_MAX
+        flush_interval = TRAFFIC_FLUSH_INTERVAL
+        last_flush = time.time()
+        while not self._stop_traffic_worker.is_set():
+            try:
+                item = self.traffic_queue.get(timeout=flush_interval)
+                batch.append(item)
+                # flush if batch full or time exceeded
+                if len(batch) >= max_batch or (time.time() - last_flush) >= flush_interval:
+                    try:
+                        # Send as compressed batch via UDP or HTTP POST
+                        self._flush_traffic_batch(batch)
+                    except Exception as e:
+                        logger.debug(f"Failed to send traffic batch: {e}")
+                    batch = []
+                    last_flush = time.time()
+            except queue.Empty:
+                # flush any pending batch on timeout
+                if batch:
+                    try:
+                        self._flush_traffic_batch(batch)
+                    except Exception as e:
+                        logger.debug(f"Failed to send traffic batch: {e}")
+                    batch = []
+                    last_flush = time.time()
+                continue
+        # flush before exit
+        if batch:
+            try:
+                self._flush_traffic_batch(batch)
+            except Exception:
+                pass
+
+    def _flush_traffic_batch(self, batch):
+        """Send a batch of traffic entries either over UDP or compressed HTTP POST."""
+        if not batch:
+            return
+        # Use UDP if configured
+        if TRAFFIC_USE_UDP and self.udp_sock:
+            try:
+                data = json.dumps(batch).encode('utf-8')
+                compressed = gzip.compress(data)
+                # For UDP we send the compressed bytes; receiver will decompress.
+                self.udp_sock.sendto(compressed, (DASHBOARD_UDP_HOST, DASHBOARD_UDP_PORT))
+                logger.debug(f'Sent UDP traffic batch of {len(batch)} to {DASHBOARD_UDP_HOST}:{DASHBOARD_UDP_PORT}')
+                return True
+            except Exception as e:
+                logger.debug(f'Failed to send UDP batch: {e}')
+                # Fall back to HTTP POST if UDP fails
+        # Otherwise, send compressed HTTP POST
+            try:
+            data = json.dumps(batch).encode('utf-8')
+            compressed = gzip.compress(data)
+            url = f"{self.alerts.dashboard_url.rstrip('/')}/traffic/batch"
+            headers = dict(self.alerts.api_headers)
+            headers.update({'Content-Encoding': 'gzip', 'Content-Type': 'application/json'})
+            self._send_with_retries(url, compressed, headers)
+                logger.debug(f'HTTP traffic batch sent to {url} size={len(compressed)}')
+                return True
+        except Exception as e:
+            logger.debug(f'HTTP batch send failed: {e}')
+            return False
+
+    def _send_with_retries(self, url, data, headers):
+        """Send data with retries and exponential backoff + jitter."""
+        base = 0.5
+        for attempt in range(TRAFFIC_RETRY_MAX):
+            try:
+                resp = self.session.post(url, data=data, headers=headers, timeout=3)
+                if resp.status_code in (200, 201):
+                    return True
+                else:
+                    logger.debug(f'HTTP batch returned {resp.status_code}: {resp.text}')
+            except Exception as e:
+                logger.debug(f'HTTP batch attempt {attempt} failed: {e}')
+
+            # Backoff with jitter
+            backoff = min(base * (2 ** attempt), 8)
+            sleep_time = backoff + random.uniform(0, backoff)
+            time.sleep(sleep_time)
+        return False
 
 
 def main():
@@ -467,6 +695,8 @@ Examples:
         type=str,
         help='Target IP for gateway mode (required when mode=gateway)'
     )
+    parser.add_argument('--dev', action='store_true', help='Run in dev sniff mode using scapy.sniff() (no NFQUEUE, no root required for some setups)')
+    parser.add_argument('--iface', type=str, default='any', help='Interface for scapy sniff when --dev is used')
     
     parser.add_argument(
         '--dashboard-url',
@@ -482,7 +712,7 @@ Examples:
         parser.error("--target-ip is required when mode is 'gateway'")
     
     # Start enforcer
-    enforcer = SaaSEnforcer(mode=args.mode, target_ip=args.target_ip)
+    enforcer = SaaSEnforcer(mode=args.mode, target_ip=args.target_ip, dev_mode=args.dev, iface=args.iface, dashboard_url=args.dashboard_url)
     enforcer.start()
 
 
