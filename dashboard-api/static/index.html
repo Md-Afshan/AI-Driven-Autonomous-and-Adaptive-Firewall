@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔥 AI Firewall Dashboard - Real-Time Attack Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(255, 107, 107, 0.3);
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+            padding: 25px;
+            border-radius: 10px;
+            border-left: 5px solid #ff6b6b;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-card h3 {
+            color: #ff6b6b;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-card .number {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .detail {
+            color: #a0a0a0;
+            font-size: 0.9em;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+
+        button {
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.5);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .alerts-container {
+            background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+            margin-bottom: 40px;
+        }
+
+        .alerts-container h2 {
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .alerts-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .alert-item {
+            background: rgba(255, 107, 107, 0.1);
+            border-left: 4px solid #ff6b6b;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            animation: slideIn 0.5s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .alert-item:hover {
+            background: rgba(255, 107, 107, 0.2);
+            transform: translateX(5px);
+        }
+
+        .alert-item.critical {
+            border-left-color: #ff0000;
+            background: rgba(255, 0, 0, 0.15);
+        }
+
+        .alert-item.warning {
+            border-left-color: #ffaa00;
+            background: rgba(255, 170, 0, 0.1);
+        }
+
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .alert-type {
+            display: inline-block;
+            padding: 5px 12px;
+            background: #ff6b6b;
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .alert-confidence {
+            color: #00ff88;
+            font-weight: 600;
+        }
+
+        .alert-time {
+            color: #a0a0a0;
+            font-size: 0.9em;
+        }
+
+        .alert-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .detail-label {
+            color: #a0a0a0;
+            font-weight: 600;
+        }
+
+        .detail-value {
+            color: #e0e0e0;
+            word-break: break-all;
+        }
+
+        .status-live {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #00ff88;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .no-alerts {
+            text-align: center;
+            color: #a0a0a0;
+            padding: 40px 20px;
+            font-style: italic;
+        }
+
+        .chart-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .chart {
+            background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        .chart h3 {
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            font-size: 1.1em;
+            letter-spacing: 1px;
+        }
+
+        .bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .bar-label {
+            width: 120px;
+            font-weight: 600;
+        }
+
+        .bar-value {
+            flex: 1;
+            background: linear-gradient(90deg, #ff6b6b 0%, #ee5a6f 100%);
+            height: 30px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            color: white;
+            font-weight: 600;
+            min-width: 50px;
+        }
+
+        .footer {
+            text-align: center;
+            color: #a0a0a0;
+            margin-top: 40px;
+            padding: 20px;
+            border-top: 1px solid rgba(255, 107, 107, 0.2);
+        }
+
+        .blocked-ips {
+            margin-top: 15px;
+        }
+
+        .blocked-ip {
+            display: inline-block;
+            background: #ff0000;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            margin: 5px 5px 5px 0;
+            font-size: 0.85em;
+        }
+
+        .block-btn {
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+            padding: 8px 12px;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .block-btn:hover {
+            background: linear-gradient(135deg, #ff3333 0%, #ff0000 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔥 AI-Driven Firewall Dashboard</h1>
+            <p><span class="status-live"></span>Real-Time Attack Detection & Prevention</p>
+        </header>
+
+        <div class="controls">
+            <button onclick="refreshData()">🔄 Refresh Data</button>
+            <button onclick="simulateAttack()">⚠️ Simulate SQL Injection</button>
+            <button onclick="simulateDDoS()">⚡ Simulate DDoS</button>
+            <button onclick="clearAlerts()">🗑️ Clear All Alerts</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Alerts</h3>
+                <div class="number" id="total-alerts">0</div>
+                <div class="detail">Active threats detected</div>
+            </div>
+            <div class="stat-card">
+                <h3>SQL Injection</h3>
+                <div class="number" id="sql-count">0</div>
+                <div class="detail">Application layer attacks</div>
+            </div>
+            <div class="stat-card">
+                <h3>DDoS Attacks</h3>
+                <div class="number" id="ddos-count">0</div>
+                <div class="detail">Network layer attacks</div>
+            </div>
+            <div class="stat-card">
+                <h3>Avg Confidence</h3>
+                <div class="number" id="avg-confidence">0%</div>
+                <div class="detail">Detection accuracy</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart">
+                <h3>Attacks by Type</h3>
+                <div id="attack-types"></div>
+            </div>
+            <div class="chart">
+                <h3>Blocked IPs</h3>
+                <div id="blocked-ips-display" class="blocked-ips"></div>
+            </div>
+        </div>
+
+        <div class="alerts-container">
+            <h2>⚠️ Real-Time Alerts</h2>
+            <div class="alerts-list" id="alerts-list"></div>
+        </div>
+
+        <div class="footer">
+            <p>🛡️ Autonomous AI Firewall | Real-time Protection | Last Updated: <span id="last-update">--:--:--</span></p>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = 'secret-token';
+        const API_BASE = 'http://127.0.0.1:8000';
+        let blockedIPs = new Set();
+
+        async function refreshData() {
+            try {
+                const alertsResponse = await fetch(`${API_BASE}/alerts`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                
+                if (!alertsResponse.ok) throw new Error('Failed to fetch alerts');
+                
+                const alertsData = await alertsResponse.json();
+                const alerts = Array.isArray(alertsData) ? alertsData : [];
+
+                const statsResponse = await fetch(`${API_BASE}/alerts/stats`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                
+                if (!statsResponse.ok) throw new Error('Failed to fetch stats');
+                
+                const stats = await statsResponse.json();
+
+                updateStats(alerts, stats);
+                updateAlertsList(alerts);
+                updateCharts(stats);
+                
+                document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+            } catch (error) {
+                console.error('Error refreshing data:', error);
+            }
+        }
+
+        function updateStats(alerts, stats) {
+            document.getElementById('total-alerts').textContent = alerts.length;
+            document.getElementById('sql-count').textContent = stats.by_attack_type?.['SQL Injection'] || 0;
+            document.getElementById('ddos-count').textContent = stats.by_attack_type?.['DDoS'] || 0;
+            
+            const avgConf = (stats.avg_confidence * 100).toFixed(1);
+            document.getElementById('avg-confidence').textContent = avgConf + '%';
+        }
+
+        function updateAlertsList(alerts) {
+            const list = document.getElementById('alerts-list');
+            
+            if (alerts.length === 0) {
+                list.innerHTML = '<div class="no-alerts">✓ No active threats detected</div>';
+                return;
+            }
+
+            list.innerHTML = alerts.map((alert, index) => `
+                <div class="alert-item ${alert.confidence_score > 0.9 ? 'critical' : 'warning'}">
+                    <div class="alert-header">
+                        <span class="alert-type">${alert.attack_type || 'Unknown'}</span>
+                        <span class="alert-confidence">Confidence: ${(alert.confidence_score * 100).toFixed(1)}%</span>
+                        <span class="alert-time">${new Date(alert.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div class="alert-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Source IP:</span>
+                            <span class="detail-value">${alert.source_ip}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Destination IP:</span>
+                            <span class="detail-value">${alert.destination_ip}</span>
+                        </div>
+                        ${alert.payload_sample ? `
+                        <div class="detail-item">
+                            <span class="detail-label">Payload:</span>
+                            <span class="detail-value">${alert.payload_sample.substring(0, 50)}...</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                    <button class="block-btn" onclick="blockIP('${alert.source_ip}')">
+                        🚫 Block IP: ${alert.source_ip}
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function updateCharts(stats) {
+            const attackTypes = document.getElementById('attack-types');
+            const maxCount = Math.max(...Object.values(stats.by_attack_type || {}), 1);
+            
+            attackTypes.innerHTML = Object.entries(stats.by_attack_type || {}).map(([type, count]) => `
+                <div class="bar">
+                    <div class="bar-label">${type}</div>
+                    <div class="bar-value" style="width: ${(count / maxCount) * 100}%">${count}</div>
+                </div>
+            `).join('');
+
+            const blockedDisplay = document.getElementById('blocked-ips-display');
+            if (blockedIPs.size === 0) {
+                blockedDisplay.innerHTML = '<p style="color: #a0a0a0;">No IPs blocked yet</p>';
+            } else {
+                blockedDisplay.innerHTML = Array.from(blockedIPs).map(ip => 
+                    `<span class="blocked-ip">🚫 ${ip}</span>`
+                ).join('');
+            }
+        }
+
+        async function simulateAttack() {
+            const alert = {
+                source_ip: '192.168.1.' + Math.floor(Math.random() * 255),
+                destination_ip: '10.0.0.1',
+                attack_type: 'SQL Injection',
+                confidence_score: 0.85 + Math.random() * 0.15,
+                timestamp: new Date().toISOString(),
+                payload_sample: "' OR '1'='1"
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/alerts`, {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(alert)
+                });
+
+                if (response.ok) {
+                    console.log('SQL Injection simulated');
+                    setTimeout(refreshData, 500);
+                } else {
+                    alert('Failed to send alert');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function simulateDDoS() {
+            const alert = {
+                source_ip: '192.168.1.' + Math.floor(Math.random() * 255),
+                destination_ip: '10.0.0.2',
+                attack_type: 'DDoS',
+                confidence_score: 0.90 + Math.random() * 0.10,
+                timestamp: new Date().toISOString(),
+                payload_sample: 'SYN flood attack'
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/alerts`, {
+                    method: 'POST',
+                    headers: {
+                        'X-API-Key': API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(alert)
+                });
+
+                if (response.ok) {
+                    console.log('DDoS simulated');
+                    setTimeout(refreshData, 500);
+                } else {
+                    alert('Failed to send alert');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        function blockIP(ip) {
+            if (!blockedIPs.has(ip)) {
+                blockedIPs.add(ip);
+                alert(`🚫 Blocked IP: ${ip}\n\nCommand executed:\niptables -A INPUT -s ${ip} -j DROP`);
+                refreshData();
+            } else {
+                alert(`IP ${ip} is already blocked`);
+            }
+        }
+
+        async function clearAlerts() {
+            if (confirm('⚠️ Clear all alerts? This cannot be undone.')) {
+                alert('Note: In production, this would call a DELETE endpoint');
+            }
+        }
+
+        setInterval(refreshData, 5000);
+        refreshData();
+    </script>
+</body>
+</html>

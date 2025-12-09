@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Firewall - Live Ops & Traffic Monitor</title>
+  <style>
+    :root{--bg:#060712;--panel:#0f1724;--accent:#0ea5e9;--danger:#ef4444;--good:#10b981;--muted:#94a3b8}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;background:linear-gradient(180deg,#02030a, #071028);color:#e6eef8}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:linear-gradient(90deg,#071735,#0a1b2e);border-bottom:1px solid rgba(255,255,255,0.02)}
+    .brand{display:flex;gap:12px;align-items:center}
+    .logo{width:36px;height:36px;border-radius:6px;background:linear-gradient(135deg,var(--accent),#0369a1);display:flex;align-items:center;justify-content:center;font-weight:700}
+    .brand h1{font-size:16px;margin:0}
+    .tabs{display:flex;gap:8px}
+    .tab{padding:8px 12px;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+    .tab.active{background:rgba(14,165,233,0.08);color:var(--accent);box-shadow:inset 0 0 0 1px rgba(14,165,233,0.04)}
+    .container{padding:18px;max-width:1400px;margin:18px auto}
+    .grid{display:grid;grid-template-columns:360px 1fr;gap:18px}
+    .panel{background:var(--panel);border-radius:8px;padding:12px;border:1px solid rgba(255,255,255,0.03)}
+    /* Left column */
+    .status{display:flex;flex-direction:column;gap:12px}
+    .defcon{display:flex;align-items:center;gap:12px}
+    .defcon .ring{width:76px;height:76px;border-radius:999px;background:radial-gradient(circle at 30% 20%, rgba(255,255,255,0.04), transparent 30%), linear-gradient(180deg,#06233a,#021025);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+    .counters{display:flex;flex-direction:column;gap:8px}
+    .counter{display:flex;justify-content:space-between;padding:10px;background:linear-gradient(90deg,rgba(255,255,255,0.01),transparent);border-radius:6px}
+    .feed{max-height:520px;overflow:auto}
+    .alert{padding:10px;border-radius:6px;margin-bottom:8px;border-left:4px solid rgba(255,255,255,0.03);display:flex;justify-content:space-between;gap:12px}
+    .alert.block{border-left-color:var(--danger);background:linear-gradient(90deg, rgba(239,68,68,0.03), transparent)}
+    .alert.allow{border-left-color:var(--good);background:linear-gradient(90deg, rgba(16,185,129,0.03), transparent)}
+    .flash{animation:alertFlash 0.45s ease}
+    @keyframes alertFlash{0%{box-shadow:0 0 0 0 rgba(239,68,68,0.3)}50%{box-shadow:0 0 18px 6px rgba(239,68,68,0.12)}100%{box-shadow:none}}
+    /* Right column: packet table */
+    .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .table{width:100%;border-collapse:collapse;font-size:13px}
+    .table thead th{position:sticky;top:0;background:rgba(6,7,18,0.6);backdrop-filter:blur(6px);padding:8px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.03);font-size:12px;color:var(--muted)}
+    .table tbody tr{border-bottom:1px solid rgba(255,255,255,0.02)}
+    .table td{padding:8px;color:#cfe8ff}
+    .verdict.allow{color:var(--good);font-weight:700}
+    .verdict.drop{color:var(--danger);font-weight:700}
+    .small{font-size:12px;color:var(--muted)}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><div class="logo">AI</div><div><h1>AI Firewall — Live Ops</h1><div class="small muted">Real-time alerts & traffic monitor</div></div></div>
+    <div class="tabs">
+      <div class="tab active" data-tab="threat">Threat Intelligence</div>
+      <div class="tab" data-tab="packets">Live Packet Stream</div>
+        <div class="tab" data-tab="compact">Compact Feed</div>
+      <div style="display:flex;align-items:center;gap:12px;margin-left:16px">
+        <div class="small muted">Backend:</div>
+        <div id="backend-status" class="small muted">Connecting...</div>
+        <div class="small muted">ML Engine:</div>
+        <div id="ml-status" class="small muted">Unknown</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <div class="panel">
+        <div id="threat-panel">
+          <div class="status">
+            <div class="defcon">
+              <div class="ring" id="defcon">1</div>
+              <div>
+                <div class="small muted">DEFCON Status</div>
+                <h2 id="defcon-label">GREEN — Secure</h2>
+                <div class="small muted">Last update: <span id="last-up">--:--:--</span></div>
+              </div>
+            </div>
+
+            <div class="counters">
+              <div class="counter"><div class="small muted">Total Attacks Blocked</div><div id="attacks-blocked">0</div></div>
+              <div class="counter"><div class="small muted">Safe Requests</div><div id="safe-req">0</div></div>
+              <div class="counter"><div class="small muted">Total Packets</div><div id="total-packs">0</div></div>
+            </div>
+
+            <div class="small muted">Live Alerts</div>
+            <div class="feed" id="alerts-feed"></div>
+          </div>
+        </div>
+        <div id="packet-panel" style="display:none">
+          <div class="small muted">Traffic Monitor (select tab)</div>
+        </div>
+
+        <div id="compact-panel" style="display:none">
+          <div class="small muted">Compact Live Feed</div>
+          <div style="margin-top:8px;margin-bottom:8px"><button onclick="clearFeed()">Clear</button>
+          <button onclick="simulateAlert()">Send Test Alert</button></div>
+          <div id="compact-feed" style="max-height:400px;overflow:auto;border:1px solid rgba(255,255,255,0.03);padding:8px;border-radius:6px"></div>
+        </div>
+        <div id="packet-panel" style="display:none">
+          <div class="small muted">Traffic Monitor (select tab)</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="toolbar"><div class="small muted">Live Packet Stream</div><div><button onclick="clearPackets()">Clear</button></div></div>
+        <div style="overflow:auto;max-height:620px">
+          <table class="table" id="packet-table">
+            <thead>
+              <tr><th>Time</th><th>Source</th><th>Destination</th><th>Proto</th><th>Len</th><th>Verdict</th><th>Vuln</th></tr>
+            </thead>
+            <tbody id="packet-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_KEY = 'secret-token';
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const alertsWS = new WebSocket(wsProto + '//' + location.host + '/ws/alerts?api_key=' + API_KEY);
+    const packetsWS = new WebSocket(wsProto + '//' + location.host + '/ws/packet-stream?api_key=' + API_KEY);
+
+    const alertsFeed = document.getElementById('alerts-feed');
+    const packetBody = document.getElementById('packet-body');
+    const attacksBlockedEl = document.getElementById('attacks-blocked');
+    const safeReqEl = document.getElementById('safe-req');
+    const totalPacksEl = document.getElementById('total-packs');
+    const lastUp = document.getElementById('last-up');
+
+    let stats = {threats_blocked:0, benign_allowed:0, total_packets:0};
+    let alertsWSConnected=false, packetsWSConnected=false;
+
+    function updateHeaderStats(){
+      attacksBlockedEl.textContent = stats.threats_blocked || 0;
+      safeReqEl.textContent = stats.benign_allowed || 0;
+      totalPacksEl.textContent = stats.total_packets || 0;
+      lastUp.textContent = new Date().toLocaleTimeString();
+      // defcon simple mapping
+      const def = document.getElementById('defcon');
+      const label = document.getElementById('defcon-label');
+      if((stats.threats_blocked||0) > 10){ def.style.background='linear-gradient(135deg,var(--danger),#b91c1c)'; label.textContent='RED — HIGH'; }
+      else if((stats.threats_blocked||0) > 3){ def.style.background='linear-gradient(135deg,#f59e0b,#f97316)'; label.textContent='YELLOW — ELEVATED'; }
+      else { def.style.background='linear-gradient(135deg,var(--accent),#0369a1)'; label.textContent='GREEN — Secure'; }
+    }
+
+    alertsWS.onopen = ()=> { console.log('alerts ws open'); alertsWSConnected=true; updateConnectionStatus(); };
+    alertsWS.onclose = ()=> { alertsWSConnected=false; updateConnectionStatus(); };
+    alertsWS.onerror = ()=> { alertsWSConnected=false; updateConnectionStatus(); };
+    alertsWS.onmessage = (e)=>{
+      const m = JSON.parse(e.data);
+      if(m.type === 'initial_stats'){
+        stats = Object.assign(stats, m.data);
+        updateHeaderStats();
+      } else if(m.type === 'alert'){
+        const a = m.data;
+        stats.total_packets = (m.stats && m.stats.total_packets) || stats.total_packets+1;
+        if(a.attack_type === 'Benign') stats.benign_allowed = (m.stats && m.stats.benign_allowed) || stats.benign_allowed+1;
+        else stats.threats_blocked = (m.stats && m.stats.threats_blocked) || stats.threats_blocked+1;
+        updateHeaderStats();
+        renderAlert(a);
+        // also mirror into compact feed
+        renderCompact(a);
+      } else if(m.type === 'clear'){
+        alertsFeed.innerHTML='';
+        stats = {threats_blocked:0, benign_allowed:0, total_packets:0};
+        updateHeaderStats();
+      }
+    };
+
+    packetsWS.onopen = ()=> { console.log('packets ws open'); packetsWSConnected=true; updateConnectionStatus(); };
+    packetsWS.onclose = ()=> { packetsWSConnected=false; updateConnectionStatus(); };
+    packetsWS.onerror = ()=> { packetsWSConnected=false; updateConnectionStatus(); };
+    packetsWS.onmessage = (e)=>{
+      const m = JSON.parse(e.data);
+      if(m.type === 'packet') renderPacket(m.data);
+    };
+
+    // When a packet is received, update the header stats total
+    packetsWS.addEventListener('message', (e)=>{
+      try{
+        const m = JSON.parse(e.data);
+        if(m.type==='packet'){
+          stats.total_packets = (stats.total_packets || 0) + 1;
+          updateHeaderStats();
+        }
+      }catch(err){}
+    });
+
+    function renderAlert(a){
+      const div = document.createElement('div');
+      div.className = 'alert ' + (a.attack_type==='Benign'?'allow':'block');
+      if(a.attack_type!=='Benign') div.classList.add('flash');
+      div.innerHTML = `<div><strong>${a.attack_type}</strong> <span class="small muted">${a.source_ip} → ${a.destination_ip}</span><div class="small muted">${new Date(a.timestamp).toLocaleTimeString()}</div></div><div style="text-align:right"><div>${(a.confidence_score*100).toFixed(0)}%</div></div>`;
+      alertsFeed.prepend(div);
+      while(alertsFeed.children.length>200) alertsFeed.removeChild(alertsFeed.lastChild);
+    }
+
+    function renderPacket(p){
+      const tr = document.createElement('tr');
+      const verdictClass = p.verdict && p.verdict.toUpperCase()==='DROP' ? 'drop' : 'allow';
+      let vuln = '';
+      if(p.ml_sql_prob !== undefined){
+        vuln = (p.ml_sql_prob*100).toFixed(0) + '%';
+      }
+      tr.innerHTML = `<td>${new Date(p.timestamp).toLocaleTimeString()}</td><td>${p.source_ip}</td><td>${p.destination_ip}</td><td>${p.protocol}</td><td>${p.length||''}</td><td class="verdict ${verdictClass}">${p.verdict||'ALLOW'}</td><td>${vuln}</td>`;
+      packetBody.prepend(tr);
+      // keep table trimmed
+      while(packetBody.children.length>1000) packetBody.removeChild(packetBody.lastChild);
+    }
+
+    // Compact feed renderer
+    function renderCompact(a){
+      const feed=document.getElementById('compact-feed');
+      const div=document.createElement('div');
+      div.className='alert ' + (a.attack_type==='Benign'?'allow':'block');
+      div.style.padding='8px';
+      div.style.marginBottom='6px';
+      div.innerHTML = `<div><strong>${a.attack_type}</strong> <span class="small muted">${a.source_ip} → ${a.destination_ip}</span></div><div class='small muted'>${(a.confidence_score*100).toFixed(0)}% • ${new Date(a.timestamp).toLocaleTimeString()}</div>`;
+      feed.prepend(div);
+      while(feed.children.length>200) feed.removeChild(feed.lastChild);
+    }
+
+    function clearPackets(){ packetBody.innerHTML=''; }
+    function clearFeed(){ alertsFeed.innerHTML=''; document.getElementById('compact-feed').innerHTML=''; }
+    function simulateAlert(){ fetch('/alerts',{method:'POST',headers:{'X-API-Key': API_KEY,'Content-Type':'application/json'}, body: JSON.stringify({source_ip:'192.168.0.'+Math.floor(Math.random()*255),destination_ip:'10.0.0.1',attack_type:'SQL Injection',confidence_score:0.92,timestamp:new Date().toISOString(),payload_sample:"' OR 1=1 --"})}) }
+
+    function updateConnectionStatus(){
+      const backendStatus = document.getElementById('backend-status');
+      const mlStatus = document.getElementById('ml-status');
+      if(alertsWSConnected && packetsWSConnected){ backendStatus.textContent='Connected'; backendStatus.style.color='var(--good)'; }
+      else if(alertsWSConnected || packetsWSConnected){ backendStatus.textContent='Degraded'; backendStatus.style.color='#f59e0b'; }
+      else { backendStatus.textContent='Disconnected'; backendStatus.style.color='var(--danger)'; }
+      // ML status polled every 5s and updated elsewhere
+    }
+
+    // Poll ML engine status every 5s
+    async function pollMLStatus(){
+      try{
+        const r = await fetch('/ml/status');
+        const j = await r.json();
+        const mlStatus = document.getElementById('ml-status');
+        if(j && j.status && j.status === 'ok'){ mlStatus.textContent='Online'; mlStatus.style.color='var(--good)'; }
+        else if(j && j.status && j.status === 'unreachable'){ mlStatus.textContent='Unreachable'; mlStatus.style.color='var(--danger)'; }
+        else { mlStatus.textContent='Unknown'; mlStatus.style.color='var(--muted)'; }
+      }catch(e){
+        const mlStatus = document.getElementById('ml-status');
+        mlStatus.textContent='Error'; mlStatus.style.color='var(--danger)';
+      }
+    }
+    setInterval(()=>pollMLStatus(), 5000);
+    pollMLStatus();
+
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      const tab = t.dataset.tab;
+      document.getElementById('threat-panel').style.display = tab==='threat'? 'block':'none';
+      document.getElementById('packet-panel').style.display = tab==='packets'? 'block':'none';
+    }));
+
+    // heartbeat
+    setInterval(()=>{ try{ if(alertsWS.readyState===1) alertsWS.send('ping'); if(packetsWS.readyState===1) packetsWS.send('ping'); }catch(e){} },5000);
+  </script>
+</body>
+
+
+</html>

@@ -1,0 +1,40 @@
+version: '3.8'
+services:
+  agent:
+    build: ../agent
+    container_name: autonomous-firewall-agent
+    network_mode: host
+    volumes:
+      - ./agent:/opt/agent
+    restart: unless-stopped
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
+  ml_engine:
+    build: ../ml-engine
+    container_name: autonomous-firewall-ml
+    ports:
+      - "5001:5001"
+    environment:
+      - API_KEY=secret-token
+    volumes:
+      - ./ml-engine:/opt/ml-engine
+    restart: unless-stopped
+
+  dashboard-api:
+    build: ../dashboard-api
+    container_name: autonomous-firewall-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./dashboard-api:/opt/dashboard-api
+    restart: unless-stopped
+
+  simulator:
+    image: python:3.11-slim
+    container_name: autonomous-firewall-sim
+    volumes:
+      - ../tools:/opt/tools
+    command: ["sleep","infinity"]
+    restart: "no"

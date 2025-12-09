@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Firewall - Compact Live Feed</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#0b1220;color:#dfefff;margin:0;padding:12px}
+    #feed{max-height:80vh;overflow:auto;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:6px}
+    .item{padding:8px;margin-bottom:6px;border-radius:4px;font-size:13px}
+    .benign{background:rgba(56,142,60,0.06);color:#7ff1a6;border-left:4px solid #2e7d32}
+    .threat{background:rgba(211,47,47,0.04);color:#ff9b9b;border-left:4px solid #b71c1c}
+    .meta{font-size:11px;color:#9fbbe8}
+    .controls{margin-bottom:8px}
+    button{padding:6px 10px;border-radius:4px;border:0;background:#1565c0;color:#fff}
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button onclick="clearFeed()">Clear</button>
+    <button onclick="simulate()">Send Test Alert</button>
+  </div>
+  <div id="feed"><div class="meta">Waiting for alerts...</div></div>
+  <script>
+    const ws = new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws/live-feed');
+    const feed=document.getElementById('feed');
+    ws.onopen=()=>{feed.innerHTML='<div class="meta">Connected. Waiting for live alerts...</div>'}
+    ws.onmessage=(e)=>{const m=JSON.parse(e.data); if(m.type==='alert'){render(m.data)}}
+    function render(a){const div=document.createElement('div');const cls=(a.attack_type==='Benign'? 'benign':'threat');div.className='item '+cls;div.innerHTML=`<div><strong>${a.attack_type}</strong> - ${a.source_ip} → ${a.destination_ip}</div><div class="meta">${(a.confidence_score*100).toFixed(0)}% • ${new Date(a.timestamp).toLocaleTimeString()}</div>`;feed.prepend(div); while(feed.children.length>200)feed.removeChild(feed.lastChild)}
+    function clearFeed(){fetch('/clear-alerts',{method:'POST',headers:{'X-API-Key':'secret-token'}})}
+    function simulate(){fetch('/alerts',{method:'POST',headers:{'Content-Type':'application/json','X-API-Key':'secret-token'},body:JSON.stringify({source_ip:'192.168.0.'+Math.floor(Math.random()*255),destination_ip:'10.0.0.1',attack_type:'SQL Injection',confidence_score:0.92,timestamp:new Date().toISOString(),payload_sample:"' OR 1=1 --"})})}
+  </script>
+</body>
+
+</html>
