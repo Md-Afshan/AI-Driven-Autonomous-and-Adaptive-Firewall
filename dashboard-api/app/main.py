@@ -266,6 +266,52 @@ async def websocket_live_alias(websocket: WebSocket):
         alerts_manager.disconnect(websocket)
 
 
+@app.websocket("/ws/traffic")
+async def websocket_traffic(websocket: WebSocket):
+    """Alias WebSocket endpoint for live traffic / packet stream."""
+    api_key = websocket.query_params.get('api_key') or websocket.headers.get('x-api-key')
+    role = get_role_for_key(api_key)
+    if role not in ('admin', 'viewer'):
+        await websocket.close(code=1008)
+        return
+    await packet_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        packet_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket traffic error: {e}")
+        try:
+            packet_manager.disconnect(websocket)
+        except:
+            pass
+
+
+@app.post('/log-packet')
+async def log_packet(request: Request, x_api_key: str | None = Header(None)):
+    """Log a single packet from an agent in near real-time.
+    Agents should POST the JSON payload: {timestamp, source_ip, destination_ip, protocol, length, verdict, [payload_sample]}
+    This will be broadcast to live websocket clients under 'packet' type.
+    """
+    require_role_for_request(x_api_key, ['agent', 'admin'])
+    try:
+        body = await request.json()
+        # Minimal validation
+        if 'timestamp' not in body or 'source_ip' not in body or 'destination_ip' not in body:
+            raise ValueError('Missing required fields')
+        # Broadcast immediately to traffic websocket clients
+        await packet_manager.broadcast({'type': 'packet', 'data': body})
+        # Update stats
+        live_stats['total_packets'] = live_stats.get('total_packets', 0) + 1
+        return {'status': 'accepted'}
+    except Exception as e:
+        logger.error(f'Failed to log packet: {e}')
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get('/ml/status')
 async def ml_status():
     """Return basic ML engine status"""
@@ -297,6 +343,16 @@ async def ml_act(body: dict):
 async def receive_traffic(request: Request, x_api_key: str | None = Header(None)):
     """Receive raw packet metadata from agents and broadcast to packet stream"""
     require_role_for_request(x_api_key, ['agent', 'admin'])
+
+    def _predict_sql_local(payload_sample):
+        try:
+            target = ML_ENGINE_BASE.rstrip('/') + '/predict_sql'
+            r = requests.post(target, json={'query': payload_sample}, timeout=2)
+            if r.status_code == 200 and 'probability' in r.json():
+                return float(r.json()['probability'])
+        except Exception:
+            return None
+        return None
 
     try:
         body = await request.json()
@@ -340,8 +396,32 @@ async def receive_traffic(request: Request, x_api_key: str | None = Header(None)
                         })
             except Exception as e:
                 logger.debug(f'Per-packet ML analysis failed: {e}')
+        elif ML_PER_PACKET_ENABLED and ('payload' in body and body.get('payload')):
+            # Some agents may send payload (field 'payload'). Use it to infer SQL probability.
+            try:
+                loop = asyncio.get_running_loop()
+                prob = await loop.run_in_executor(None, _predict_sql_local, body.get('payload'))
+                if prob is not None:
+                    body['ml_sql_prob'] = prob
+                    if prob >= ML_SQL_THRESHOLD:
+                        alert_obj = SaaSAlert(
+                            source_ip=body.get('source_ip', ''),
+                            destination_ip=body.get('destination_ip', ''),
+                            attack_type='SQL Injection',
+                            confidence_score=prob,
+                            timestamp=datetime.utcnow().isoformat() + 'Z',
+                            payload_sample=str(body.get('payload'))[:200]
+                        )
+                        await alerts_manager.broadcast({
+                            'type': 'alert',
+                            'data': alert_obj.dict(),
+                            'stats': live_stats
+                        })
+            except Exception as e:
+                logger.debug(f'Per-packet ML analysis failed: {e}')
 
-        # Broadcast to packet stream clients
+        # Update stats and Broadcast to packet stream clients
+        live_stats['total_packets'] = live_stats.get('total_packets', 0) + 1
         await packet_manager.broadcast({
             'type': 'packet',
             'data': body
@@ -475,6 +555,36 @@ async def receive_traffic_batch(request: Request, x_api_key: str | None = Header
                                 await alerts_manager.broadcast({'type': 'alert', 'data': alert_obj.dict(), 'stats': live_stats})
                     except Exception:
                         pass
+                elif ML_PER_PACKET_ENABLED and p.get('payload'):
+                    # Some agents may send 'payload' instead of 'payload_sample' in batches
+                    def _predict_sql_local_batch(payload_sample):
+                        try:
+                            target = ML_ENGINE_BASE.rstrip('/') + '/predict_sql'
+                            r = requests.post(target, json={'query': payload_sample}, timeout=2)
+                            if r.status_code == 200 and 'probability' in r.json():
+                                return float(r.json()['probability'])
+                        except Exception:
+                            return None
+                        return None
+                    try:
+                        loop = asyncio.get_running_loop()
+                        prob = await loop.run_in_executor(None, _predict_sql_local_batch, p.get('payload'))
+                        if prob is not None:
+                            p['ml_sql_prob'] = prob
+                            if prob >= ML_SQL_THRESHOLD:
+                                alert_obj = SaaSAlert(
+                                    source_ip=p.get('source_ip', ''),
+                                    destination_ip=p.get('destination_ip', ''),
+                                    attack_type='SQL Injection',
+                                    confidence_score=prob,
+                                    timestamp=datetime.utcnow().isoformat() + 'Z',
+                                    payload_sample=str(p.get('payload'))[:200]
+                                )
+                                await alerts_manager.broadcast({'type': 'alert', 'data': alert_obj.dict(), 'stats': live_stats})
+                    except Exception:
+                        pass
+                # Update stats for each packet
+                live_stats['total_packets'] = live_stats.get('total_packets', 0) + 1
                 await packet_manager.broadcast({'type': 'packet', 'data': p})
             except Exception:
                 # swallow per-packet errors

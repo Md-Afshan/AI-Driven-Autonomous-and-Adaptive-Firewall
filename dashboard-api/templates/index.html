@@ -82,14 +82,11 @@
             <div class="feed" id="alerts-feed"></div>
           </div>
         </div>
-        <div id="packet-panel" style="display:none">
-          <div class="small muted">Traffic Monitor (select tab)</div>
-        </div>
+        <!-- packet panel placeholder removed (duplicate) -->
 
         <div id="compact-panel" style="display:none">
           <div class="small muted">Compact Live Feed</div>
-          <div style="margin-top:8px;margin-bottom:8px"><button onclick="clearFeed()">Clear</button>
-          <button onclick="simulateAlert()">Send Test Alert</button></div>
+          <div style="margin-top:8px;margin-bottom:8px"><button onclick="clearFeed()">Clear</button></div>
           <div id="compact-feed" style="max-height:400px;overflow:auto;border:1px solid rgba(255,255,255,0.03);padding:8px;border-radius:6px"></div>
         </div>
         <div id="packet-panel" style="display:none">
@@ -97,7 +94,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="packets-right-panel">
         <div class="toolbar"><div class="small muted">Live Packet Stream</div><div><button onclick="clearPackets()">Clear</button></div></div>
         <div style="overflow:auto;max-height:620px">
           <table class="table" id="packet-table">
@@ -116,6 +113,7 @@
     const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const alertsWS = new WebSocket(wsProto + '//' + location.host + '/ws/alerts?api_key=' + API_KEY);
     const packetsWS = new WebSocket(wsProto + '//' + location.host + '/ws/packet-stream?api_key=' + API_KEY);
+    const trafficWS = new WebSocket(wsProto + '//' + location.host + '/ws/traffic?api_key=' + API_KEY);
 
     const alertsFeed = document.getElementById('alerts-feed');
     const packetBody = document.getElementById('packet-body');
@@ -171,6 +169,10 @@
       const m = JSON.parse(e.data);
       if(m.type === 'packet') renderPacket(m.data);
     };
+    trafficWS.onmessage = (e)=>{
+      const m = JSON.parse(e.data);
+      if(m.type === 'packet') renderPacket(m.data);
+    };
 
     // When a packet is received, update the header stats total
     packetsWS.addEventListener('message', (e)=>{
@@ -219,7 +221,7 @@
 
     function clearPackets(){ packetBody.innerHTML=''; }
     function clearFeed(){ alertsFeed.innerHTML=''; document.getElementById('compact-feed').innerHTML=''; }
-    function simulateAlert(){ fetch('/alerts',{method:'POST',headers:{'X-API-Key': API_KEY,'Content-Type':'application/json'}, body: JSON.stringify({source_ip:'192.168.0.'+Math.floor(Math.random()*255),destination_ip:'10.0.0.1',attack_type:'SQL Injection',confidence_score:0.92,timestamp:new Date().toISOString(),payload_sample:"' OR 1=1 --"})}) }
+    // simulateAlert removed; tests should use demo_agent or curl to generate traffic
 
     function updateConnectionStatus(){
       const backendStatus = document.getElementById('backend-status');
@@ -253,7 +255,9 @@
       t.classList.add('active');
       const tab = t.dataset.tab;
       document.getElementById('threat-panel').style.display = tab==='threat'? 'block':'none';
-      document.getElementById('packet-panel').style.display = tab==='packets'? 'block':'none';
+      document.getElementById('compact-panel').style.display = tab==='compact'? 'block':'none';
+      // Keep the right packets panel visible for context; highlight behavior could be added later.
+      document.getElementById('packets-right-panel').style.display = 'block';
     }));
 
     // heartbeat

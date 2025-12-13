@@ -1,0 +1,5 @@
+/home/firewall/Desktop/AI-Firwall/AI-Driven-Autonomous-and-Adaptive-Firewall/tools/demo_agent.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  'timestamp': datetime.utcnow().isoformat() + 'Z',
+/home/firewall/Desktop/AI-Firwall/AI-Driven-Autonomous-and-Adaptive-Firewall/tools/demo_agent.py:61: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  'timestamp': datetime.utcnow().isoformat() + 'Z',
+demo done

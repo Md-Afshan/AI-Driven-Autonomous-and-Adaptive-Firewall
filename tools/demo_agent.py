@@ -12,7 +12,7 @@ import json
 
 
 def gen_packet():
-    return {
+    p = {
         'timestamp': datetime.utcnow().isoformat() + 'Z',
         'source_ip': f'10.0.0.{random.randint(2,254)}',
         'destination_ip': '192.168.1.10',
@@ -20,6 +20,14 @@ def gen_packet():
         'length': random.randint(32,1500),
         'verdict': random.choice(['ALLOW','DROP'])
     }
+    # Occasionally include a payload sample (to trigger ML per-packet SQL scanning)
+    if random.random() < 0.15:
+        # random SQL-like payloads vs benign samples
+        if random.random() < 0.2:
+            p['payload'] = "' OR 1=1 -- SELECT * FROM users WHERE id = 1"
+        else:
+            p['payload'] = 'normal benign GET /index.html HTTP/1.1'
+    return p
 
 
 def main():
@@ -35,10 +43,14 @@ def main():
     start = time.time()
     while time.time() - start < args.duration:
         p = gen_packet()
-        try:
-            requests.post(args.dashboard + '/traffic', headers=headers, json=p, timeout=2)
-        except Exception as e:
-            print('traffic post error', e)
+        # best-effort post with a short retry to handle transient dashboard slowness
+        for attempt in range(2):
+            try:
+                requests.post(args.dashboard + '/traffic', headers=headers, json=p, timeout=5)
+                break
+            except Exception as e:
+                if attempt == 1:
+                    print('traffic post error', e)
         # randomly send an alert
         if random.random() < 0.1:
             alert = {
@@ -50,7 +62,7 @@ def main():
                 'payload_sample': 'demo'
             }
             try:
-                requests.post(args.dashboard + '/alerts', headers=headers, json=alert, timeout=2)
+                requests.post(args.dashboard + '/alerts', headers=headers, json=alert, timeout=5)
             except Exception as e:
                 print('alert post error', e)
         time.sleep(interval)

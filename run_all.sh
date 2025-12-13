@@ -33,16 +33,16 @@ echo "Starting Dashboard (dashboard-api) on port 8000..."
 
 sleep 1
 
-# Optional: start a lightweight agent simulator if present
+# Optional: start the demo agent (tools/demo_agent.py)
 if [ "${1:-}" != "--no-agent" ]; then
-  if [ -f "$ROOT_DIR/agent/run_agent_simulator.py" ]; then
-    echo "Starting agent simulator..."
+  if [ -f "$ROOT_DIR/tools/demo_agent.py" ]; then
+    echo "Starting demo agent..."
     (
-      cd "$ROOT_DIR/agent"
-      nohup "$VENV_PY" run_agent_simulator.py > "$LOG_DIR/agent.log" 2>&1 &
+      cd "$ROOT_DIR/tools"
+      nohup "$VENV_PY" demo_agent.py --dashboard http://127.0.0.1:8000 --duration 300 > "$LOG_DIR/demo_agent.log" 2>&1 &
     )
   else
-    echo "No agent simulator found; skipping agent startup"
+    echo "No demo agent found; skipping agent startup"
   fi
 else
   echo "Agent startup skipped by flag"
