@@ -70,10 +70,11 @@ python ml_train/train_manager.py --mode nids      # Train only NIDS
 ### Usage:
 ```bash
 # Protect local host
-sudo python agent/saas_enforcer.py --mode local
+sudo python agent/saas_enforcer.py --mode local --iface <your-interface>
 
 # Protect victim VM (192.168.1.10)
-sudo python agent/saas_enforcer.py --mode gateway --target-ip 192.168.1.10
+sudo python agent/saas_enforcer.py --mode gateway --target-ip 192.168.1.10 --iface <your-interface>
+# Use --iface to bind iptables/NFQUEUE to the external interface (e.g., enp0s3)
 
 # With custom dashboard URL
 sudo python agent/saas_enforcer.py --mode local --dashboard-url http://192.168.1.50:8000

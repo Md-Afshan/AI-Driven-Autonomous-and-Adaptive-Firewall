@@ -69,7 +69,10 @@ async def main():
         alerts_uri = 'ws://127.0.0.1:8002/ws/alerts?api_key='+API_KEY
         packets_uri = 'ws://127.0.0.1:8002/ws/packet-stream?api_key='+API_KEY
         listen_alerts = asyncio.ensure_future(ws_listen(alerts_uri, recv_count=2, timeout=10))
-        listen_packets = asyncio.ensure_future(ws_listen(packets_uri, recv_count=4, timeout=10))
+        listen_packets = asyncio.ensure_future(ws_listen(packets_uri, recv_count=1, timeout=10))
+
+        # Give listeners a brief moment to fully connect before sending messages
+        time.sleep(1.0)
 
         # Send some traffic + alerts
         headers = {'X-API-Key': API_KEY, 'Content-Type': 'application/json'}

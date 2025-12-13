@@ -1,0 +1,7 @@
+INFO:     Started server process [18896]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8000): address already in use
+INFO:     Waiting for application shutdown.
+INFO:app.main:Shutting down background services
+INFO:     Application shutdown complete.

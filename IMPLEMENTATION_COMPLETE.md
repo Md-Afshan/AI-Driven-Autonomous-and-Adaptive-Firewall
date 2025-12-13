@@ -56,10 +56,11 @@ python ml_train/train_manager.py --mode all
 **Deployment Modes**:
 ```bash
 # Local mode - protect firewall host
-sudo python agent/saas_enforcer.py --mode local
+sudo python agent/saas_enforcer.py --mode local --iface <your-interface>
 
 # Gateway mode - protect victim VM
-sudo python agent/saas_enforcer.py --mode gateway --target-ip 192.168.1.10
+sudo python agent/saas_enforcer.py --mode gateway --target-ip 192.168.1.10 --iface <your-interface>
+# Use --iface to bind NFQUEUE and iptables to the external interface (e.g., enp0s3)
 ```
 
 ---

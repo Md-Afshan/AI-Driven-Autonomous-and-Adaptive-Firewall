@@ -378,22 +378,22 @@ class SaaSEnforcer:
             if self.mode == 'local':
                 # Protect local host
                 logger.info("Setting up iptables rules for LOCAL mode (INPUT chain)")
-                subprocess.run(
-                    ['iptables', '-I', 'INPUT', '-j', 'NFQUEUE', '--queue-num', str(NFQUEUE_NUM)],
-                    check=True,
-                    capture_output=True
-                )
+                cmd = ['iptables', '-I', 'INPUT']
+                if self.sniff_iface and self.sniff_iface != 'any':
+                    cmd += ['-i', self.sniff_iface]
+                cmd += ['-j', 'NFQUEUE', '--queue-num', str(NFQUEUE_NUM)]
+                subprocess.run(cmd, check=True, capture_output=True)
             elif self.mode == 'gateway':
                 # Protect victim VM behind gateway
                 if not self.target_ip:
                     raise ValueError("--target-ip is required for gateway mode")
                 
                 logger.info(f"Setting up iptables rules for GATEWAY mode (FORWARD chain to {self.target_ip})")
-                subprocess.run(
-                    ['iptables', '-I', 'FORWARD', '-d', self.target_ip, '-j', 'NFQUEUE', '--queue-num', str(NFQUEUE_NUM)],
-                    check=True,
-                    capture_output=True
-                )
+                cmd = ['iptables', '-I', 'FORWARD']
+                if self.sniff_iface and self.sniff_iface != 'any':
+                    cmd += ['-i', self.sniff_iface]
+                cmd += ['-d', self.target_ip, '-j', 'NFQUEUE', '--queue-num', str(NFQUEUE_NUM)]
+                subprocess.run(cmd, check=True, capture_output=True)
             
             logger.info("iptables rules configured successfully")
         except subprocess.CalledProcessError as e:
@@ -427,8 +427,10 @@ class SaaSEnforcer:
                 # include optional payload snippet if found so dashboard can perform extra analysis (WAF)
                 if analysis.get('details') and analysis['details'].get('payload_sample'):
                     traffic['payload_sample'] = analysis['details'].get('payload_sample')
-                }
                 try:
+                    # post immediate packet to dashboard (best-effort, non-blocking)
+                    t = threading.Thread(target=self._post_single_packet, args=(traffic,), daemon=True)
+                    t.start()
                     self.traffic_queue.put_nowait(traffic)
                 except queue.Full:
                     logger.debug('Traffic queue full, dropping traffic report')
@@ -498,7 +500,17 @@ class SaaSEnforcer:
         try:
             def _sniff_loop():
                 # prn handler receives scapy pkt; use store=False to avoid memory buildup
-                sniff(prn=self._handle_sniffed_packet, iface=self.sniff_iface, store=False)
+                # Resolve 'any' to a concrete interface if necessary
+                iface = self.sniff_iface
+                if iface == 'any':
+                    # choose first non-loopback interface
+                    try:
+                        ifaces = [i for i in os.listdir('/sys/class/net') if i != 'lo' and not i.startswith('docker') and not i.startswith('veth')]
+                        if ifaces:
+                            iface = ifaces[0]
+                    except Exception:
+                        iface = 'lo'
+                sniff(prn=self._handle_sniffed_packet, iface=iface, store=False)
 
             self._sniff_thread = threading.Thread(target=_sniff_loop, daemon=True)
             self._sniff_thread.start()
@@ -537,6 +549,9 @@ class SaaSEnforcer:
                     'verdict': 'DROP' if analysis['is_malicious'] else 'ALLOW'
                 }
                 try:
+                    # best-effort immediate POST to dashboard
+                    t = threading.Thread(target=self._post_single_packet, args=(traffic,), daemon=True)
+                    t.start()
                     self.traffic_queue.put_nowait(traffic)
                 except queue.Full:
                     logger.debug('Traffic queue full, dropping traffic report')
@@ -636,16 +651,17 @@ class SaaSEnforcer:
             except Exception as e:
                 logger.debug(f'Failed to send UDP batch: {e}')
                 # Fall back to HTTP POST if UDP fails
+
         # Otherwise, send compressed HTTP POST
-            try:
+        try:
             data = json.dumps(batch).encode('utf-8')
             compressed = gzip.compress(data)
             url = f"{self.alerts.dashboard_url.rstrip('/')}/traffic/batch"
             headers = dict(self.alerts.api_headers)
             headers.update({'Content-Encoding': 'gzip', 'Content-Type': 'application/json'})
             self._send_with_retries(url, compressed, headers)
-                logger.debug(f'HTTP traffic batch sent to {url} size={len(compressed)}')
-                return True
+            logger.debug(f'HTTP traffic batch sent to {url} size={len(compressed)}')
+            return True
         except Exception as e:
             logger.debug(f'HTTP batch send failed: {e}')
             return False
@@ -668,6 +684,21 @@ class SaaSEnforcer:
             sleep_time = backoff + random.uniform(0, backoff)
             time.sleep(sleep_time)
         return False
+
+    def _post_single_packet(self, traffic):
+        """Send a single packet as a JSON HTTP POST to the dashboard's /log-packet endpoint (best effort)."""
+        try:
+            url = f"{self.dashboard_url.rstrip('/')}/log-packet"
+            # Use agent session for persistent connection
+            headers = dict(self.alerts.api_headers)
+            headers.update({'Content-Type': 'application/json'})
+            resp = self.session.post(url, json=traffic, headers=headers, timeout=1)
+            if resp.status_code not in (200, 201):
+                logger.debug(f'log-packet returned {resp.status_code}: {resp.text}')
+            return True
+        except Exception as e:
+            logger.debug(f'Failed to post packet to dashboard: {e}')
+            return False
 
 
 def main():

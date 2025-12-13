@@ -267,6 +267,35 @@ curl -X POST "http://localhost:8000/alerts" \
 
 ---
 
+## 🔗 Connecting production agents / deployment notes ✅
+
+- Dashboard API expects agent requests to be authenticated via an API key. Set a strong API key in the dashboard's environment before starting:
+
+```bash
+export API_KEY="YOUR_STRONG_SECRET"
+```
+
+- If you need multiple keys (for admin/viewer/agent roles) provide a JSON mapping via `API_KEYS_JSON` e.g.:
+
+```bash
+export API_KEYS_JSON='{"agent-key-123":"agent","viewer-key-xyz":"viewer"}'
+```
+
+- On agents, configure where to send traffic and the API key:
+
+```bash
+export DASHBOARD_API_URL="https://dashboard.example.com"
+export API_KEY="YOUR_STRONG_SECRET"
+# then run the agent (example):
+python saas_enforcer.py --mode local
+```
+
+- To enable per-packet ML scanning on the dashboard set `ML_PER_PACKET_ENABLED=true` and ensure `ML_ENGINE_BASE` points to your ML engine (default http://127.0.0.1:5001).
+
+These steps will let production agents post live traffic and alerts to the dashboard's live packet stream and alert pipeline.
+
+---
+
 ## 🔍 Verification
 
 Check if everything is properly installed:
