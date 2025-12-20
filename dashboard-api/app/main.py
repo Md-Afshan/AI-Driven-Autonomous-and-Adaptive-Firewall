@@ -101,6 +101,11 @@ class ConnectionManager:
         # Clean up disconnected clients
         for conn in disconnected:
             self.disconnect(conn)
+        # Log broadcast summary for debugging
+        try:
+            logger.debug(f"Broadcasted message type={message.get('type')} to {len(self.active_connections) - len(disconnected)} clients")
+        except Exception:
+            pass
 
 
 alerts_manager = ConnectionManager()
@@ -234,6 +239,11 @@ async def websocket_packets(websocket: WebSocket):
         await websocket.close(code=1008)
         return
     await packet_manager.connect(websocket)
+    # Send initial stats to help clients verify the connection quickly
+    try:
+        await websocket.send_json({"type": "initial_stats", "data": live_stats})
+    except Exception:
+        pass
     try:
         while True:
             data = await websocket.receive_text()
@@ -649,6 +659,33 @@ async def get_stats():
         stats['avg_confidence'] = total_confidence / len(alerts_history)
     
     return stats
+
+
+@app.post('/admin/reset')
+async def admin_reset(request: Request):
+    """Administrative: Reset in-memory stats, alerts history and truncate persistent alert log.
+    Requires admin API key in header `X-API-Key` or `x-api-key`.
+    """
+    x_api_key = request.headers.get('x-api-key') or request.headers.get('X-API-Key')
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail='Invalid API key')
+
+    global alerts_history, live_stats, action_history
+    alerts_history = []
+    action_history = []
+    live_stats = {"total_packets": 0, "threats_blocked": 0, "benign_allowed": 0}
+
+    # Truncate persistent alerts file
+    try:
+        open(ALERTS_LOG_FILE, 'w').close()
+    except Exception as e:
+        logger.error(f'Failed to truncate alerts log: {e}')
+
+    # Broadcast a 'clear' message so connected clients reset
+    await alerts_manager.broadcast({"type": "clear"})
+    await packet_manager.broadcast({"type": "clear"})
+
+    return {"status": "reset", "message": "alerts, actions and stats reset"}
 
 
 @app.get('/live-stats')

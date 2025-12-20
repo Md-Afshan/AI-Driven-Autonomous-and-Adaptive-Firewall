@@ -99,7 +99,7 @@
         <div style="overflow:auto;max-height:620px">
           <table class="table" id="packet-table">
             <thead>
-              <tr><th>Time</th><th>Source</th><th>Destination</th><th>Proto</th><th>Len</th><th>Verdict</th><th>Vuln</th></tr>
+              <tr><th>Time</th><th>Source</th><th>Destination</th><th>Observed</th><th>Proto</th><th>Len</th><th>Verdict</th><th>Vuln</th></tr>
             </thead>
             <tbody id="packet-body"></tbody>
           </table>
@@ -201,7 +201,8 @@
       if(p.ml_sql_prob !== undefined){
         vuln = (p.ml_sql_prob*100).toFixed(0) + '%';
       }
-      tr.innerHTML = `<td>${new Date(p.timestamp).toLocaleTimeString()}</td><td>${p.source_ip}</td><td>${p.destination_ip}</td><td>${p.protocol}</td><td>${p.length||''}</td><td class="verdict ${verdictClass}">${p.verdict||'ALLOW'}</td><td>${vuln}</td>`;
+      const observer = p.observer_ip || p.agent_ip || '';
+      tr.innerHTML = `<td>${new Date(p.timestamp).toLocaleTimeString()}</td><td>${p.source_ip}</td><td>${p.destination_ip}</td><td>${observer}</td><td>${p.protocol}</td><td>${p.length||''}</td><td class="verdict ${verdictClass}">${p.verdict||'ALLOW'}</td><td>${vuln}</td>`;
       packetBody.prepend(tr);
       // keep table trimmed
       while(packetBody.children.length>1000) packetBody.removeChild(packetBody.lastChild);
