@@ -1,0 +1,33 @@
+2025-12-20 21:53:23.262325: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2025-12-20 21:53:24.114507: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-12-20 21:53:30.888652: I external/local_xla/xla/tsl/cuda/cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+2025-12-20 21:53:38,411 - __main__ - WARNING - WAF model not found at /home/firewall/Desktop/AI-Firwall/scripts/../agent/../ml-engine/models/waf_cnn.h5
+2025-12-20 21:53:38,414 - __main__ - WARNING - Tokenizer not found at /home/firewall/Desktop/AI-Firwall/scripts/../agent/../ml-engine/models/tokenizer.pkl
+2025-12-20 21:53:38,414 - __main__ - WARNING - NIDS model not found at /home/firewall/Desktop/AI-Firwall/scripts/../agent/../ml-engine/models/nids_rf.pkl
+2025-12-20 21:53:38,414 - __main__ - WARNING - Scaler not found at /home/firewall/Desktop/AI-Firwall/scripts/../agent/../ml-engine/models/scaler.pkl
+2025-12-20 21:53:38,416 - __main__ - INFO - ================================================================================
+2025-12-20 21:53:38,416 - __main__ - INFO - AI-Driven Autonomous and Adaptive Firewall - SaaS Enforcer Starting
+2025-12-20 21:53:38,416 - __main__ - INFO - ================================================================================
+2025-12-20 21:53:38,416 - __main__ - INFO - Mode: LOCAL
+2025-12-20 21:53:38,416 - __main__ - WARNING - Starting in DEV sniff mode — scapy will capture packets and we will forward to dashboard
+Exception in thread Thread-2 (_sniff_loop):
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+2025-12-20 21:53:38,417 - __main__ - INFO - Sniffing on interface enp0s3 started (DEV mode)
+    self.run()
+  File "/usr/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/firewall/Desktop/AI-Firwall/scripts/../agent/saas_enforcer.py", line 513, in _sniff_loop
+    sniff(prn=self._handle_sniffed_packet, iface=iface, store=False)
+  File "/home/firewall/Desktop/AI-Firwall/.venv/lib/python3.12/site-packages/scapy/sendrecv.py", line 1424, in sniff
+    sniffer._run(*args, **kwargs)
+  File "/home/firewall/Desktop/AI-Firwall/.venv/lib/python3.12/site-packages/scapy/sendrecv.py", line 1273, in _run
+    sniff_sockets[_RL2(iface)(type=ETH_P_ALL, iface=iface,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/firewall/Desktop/AI-Firwall/.venv/lib/python3.12/site-packages/scapy/arch/linux/__init__.py", line 218, in __init__
+    self.ins = socket.socket(
+               ^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 233, in __init__
+    _socket.socket.__init__(self, family, type, proto, fileno)
+PermissionError: [Errno 1] Operation not permitted

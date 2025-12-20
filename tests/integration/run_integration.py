@@ -28,8 +28,12 @@ import sys
 
 # Use the current Python executable to ensure the same environment is used
 PY_EXE = sys.executable
-UVICORN_CMD = [PY_EXE, '-m', 'uvicorn', 'app.main:app', '--port', '8002']
-API_KEY = os.getenv('API_KEY', 'secret-token')
+# Allow overriding host/port (so tests can target a remote dashboard)
+DASHBOARD_HOST = os.environ.get('DASHBOARD_HOST', '127.0.0.1')
+DASHBOARD_PORT = int(os.environ.get('DASHBOARD_PORT', '8002'))
+UVICORN_CMD = [PY_EXE, '-m', 'uvicorn', 'app.main:app', '--port', str(DASHBOARD_PORT)]
+API_KEY = os.environ.get('API_KEY', 'secret-token')
+BASE_URL = f'http://{DASHBOARD_HOST}:{DASHBOARD_PORT}'
 
 async def ws_listen(uri, recv_count=3, timeout=8):
     events = []
@@ -55,7 +59,7 @@ async def main():
         started = False
         for i in range(30):
             try:
-                r = requests.get('http://127.0.0.1:8002/')
+                r = requests.get(f'{BASE_URL}/')
                 if r.status_code == 200:
                     started = True
                     break
@@ -66,8 +70,8 @@ async def main():
             raise RuntimeError('Failed to start dashboard within timeout')
 
         # Start websocket listeners
-        alerts_uri = 'ws://127.0.0.1:8002/ws/alerts?api_key='+API_KEY
-        packets_uri = 'ws://127.0.0.1:8002/ws/packet-stream?api_key='+API_KEY
+        alerts_uri = f'ws://{DASHBOARD_HOST}:{DASHBOARD_PORT}/ws/alerts?api_key='+API_KEY
+        packets_uri = f'ws://{DASHBOARD_HOST}:{DASHBOARD_PORT}/ws/packet-stream?api_key='+API_KEY
         listen_alerts = asyncio.ensure_future(ws_listen(alerts_uri, recv_count=2, timeout=10))
         listen_packets = asyncio.ensure_future(ws_listen(packets_uri, recv_count=1, timeout=10))
 
@@ -86,7 +90,7 @@ async def main():
         }
         # Send traffic
         for i in range(3):
-            requests.post('http://127.0.0.1:8002/traffic', headers=headers, json=traffic_template(i))
+            requests.post(f'{BASE_URL}/traffic', headers=headers, json=traffic_template(i))
             time.sleep(0.2)
 
         # Post an alert
@@ -98,7 +102,7 @@ async def main():
             'timestamp': datetime.utcnow().isoformat() + 'Z',
             'payload_sample': ''
         }
-        requests.post('http://127.0.0.1:8002/alerts', headers=headers, json=alert)
+        requests.post(f'{BASE_URL}/alerts', headers=headers, json=alert)
 
         alerts = await listen_alerts
         packets = await listen_packets
@@ -107,7 +111,7 @@ async def main():
         print('Packets received:', packets)
 
         # A quick stats check
-        r1 = requests.get('http://127.0.0.1:8002/alerts')
+        r1 = requests.get(f'{BASE_URL}/alerts')
         print('Alerts total (GET):', len(r1.json()))
 
     finally:

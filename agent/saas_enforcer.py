@@ -692,6 +692,28 @@ class SaaSEnforcer:
             # Use agent session for persistent connection
             headers = dict(self.alerts.api_headers)
             headers.update({'Content-Type': 'application/json'})
+            # attach the observer (agent) IP so the dashboard can display which agent saw the packet
+            # derive local IP by connecting a UDP socket to the dashboard host
+            if 'observer_ip' not in traffic:
+                try:
+                    parts = self.dashboard_url.split('://')[-1].split(':')
+                    host = parts[0]
+                    port = int(parts[1]) if len(parts) > 1 else 80
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(0.5)
+                    try:
+                        s.connect((host, port))
+                        local_ip = s.getsockname()[0]
+                    except Exception:
+                        local_ip = '127.0.0.1'
+                    finally:
+                        try: s.close()
+                        except:
+                            pass
+                    traffic['observer_ip'] = local_ip
+                except Exception:
+                    # best-effort; fail silently and don't block packet processing
+                    pass
             resp = self.session.post(url, json=traffic, headers=headers, timeout=1)
             if resp.status_code not in (200, 201):
                 logger.debug(f'log-packet returned {resp.status_code}: {resp.text}')

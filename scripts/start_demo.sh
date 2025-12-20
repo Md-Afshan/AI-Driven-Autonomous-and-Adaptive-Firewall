@@ -13,11 +13,17 @@ mkdir -p "$LOG_DIR"
 
 NO_DEMO=0
 NO_TESTS=0
+NO_RESET=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-demo) NO_DEMO=1; shift ;;
     --no-tests) NO_TESTS=1; shift ;;
+    --no-reset) NO_RESET=1; shift ;;
+    --with-enforcer) WITH_ENFORCER=1; shift ;;
+    --enforcer-iface) ENF_IFACE="$2"; shift 2 ;;
+    --enforcer-mode) ENF_MODE="$2"; shift 2 ;;
+    --enforcer-target) ENF_TARGET="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -97,6 +103,12 @@ PY
 wait_for_http "http://127.0.0.1:5001/models/active" 45 || (echo "ML engine did not start in time. Check $LOG_DIR/ml_engine.log"; exit 1)
 wait_for_http "http://127.0.0.1:8000/live-stats" 45 || (echo "Dashboard did not start in time. Check $LOG_DIR/dashboard.log"; exit 1)
 
+# Reset dashboard state (alerts/stats/log) unless the user asked us not to
+if [ $NO_RESET -eq 0 ]; then
+  echo "Resetting dashboard state..."
+  "$ROOT_DIR/scripts/reset_dashboard.sh" "http://127.0.0.1:8000" "${API_KEY:-secret-token}" || echo "Warning: dashboard reset failed"
+fi
+
 # Start demo agent (optional)
 if [ $NO_DEMO -eq 0 ]; then
   echo "Starting demo agent (tools/demo_agent.py)..."
@@ -106,6 +118,31 @@ if [ $NO_DEMO -eq 0 ]; then
   )
 else
   echo "Demo agent startup skipped (--no-demo)"
+fi
+
+# Optionally launch saas_enforcer on this host (requires sudo)
+if [ "${WITH_ENFORCER:-0}" -eq 1 ]; then
+  ENF_MODE=${ENF_MODE:-local}
+  if [ -z "${ENF_IFACE:-}" ]; then
+    read -p "Enter enforcer interface (e.g. enp0s8) to bind iptables/NFQUEUE: " ENF_IFACE
+  fi
+  echo "Starting saas_enforcer (mode=$ENF_MODE iface=$ENF_IFACE)"
+  # Use sudo to start the enforcer as root; use venv python if available
+  ENF_CMD=("$PY" "agent/saas_enforcer.py" --mode "$ENF_MODE" --iface "$ENF_IFACE" --dashboard-url "http://127.0.0.1:8000")
+  if [ -n "${ENF_TARGET:-}" ]; then
+    ENF_CMD+=(--target-ip "$ENF_TARGET")
+  fi
+  # Start it with sudo and nohup so it stays running
+  sudo nohup "${ENF_CMD[@]}" > "$LOG_DIR/enforcer.log" 2>&1 &
+  echo $! > "$LOG_DIR/enforcer.pid"
+  # Give it a moment and verify the process is running
+  sleep 1
+  if pgrep -f 'saas_enforcer.py' >/dev/null 2>&1; then
+    echo "saas_enforcer started (check $LOG_DIR/enforcer.log)"
+  else
+    echo "Failed to start saas_enforcer automatically. Check $LOG_DIR/enforcer.log for details."
+    echo "You can start it manually with: sudo $PY agent/saas_enforcer.py --mode $ENF_MODE --iface $ENF_IFACE --dashboard-url http://127.0.0.1:8000"
+  fi
 fi
 
 # Run integration tests (optional)
